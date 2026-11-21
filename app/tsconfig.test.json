@@ -16,6 +16,8 @@
     "types": ["node"]
   },
   "files": [
+    "src/documents.ts",
+    "src/documents.test.ts",
     "src/index-status.ts",
     "src/index-status.test.ts",
     "src/page-range.ts",

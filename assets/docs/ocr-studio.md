@@ -11,8 +11,13 @@ Open file ─▶ OCR ─▶ page preview + editable regions ─▶ .docx / .xlsx
 
 ## Opening a document
 
-The file dialog accepts `png`, `jpg`, `jpeg`, `tif`, `tiff`, `bmp`, `webp` and
-`pdf`. An image becomes one page. A PDF is rendered with pdfium at 300 dpi, one
+Opening a document has two doors: **Open file** and drag-and-drop onto the
+window. Both accept `png`, `jpg`, `jpeg`, `tif`, `tiff`, `bmp`, `webp` and `pdf`,
+both go through the same adoption path, and a dropped file with any other
+extension is refused by name instead of failing later inside the engine. Only
+one document can be loaded at a time, and neither door opens while a
+recognition run is in flight: the old file's results would otherwise land in the
+new file's panes. An image becomes one page. A PDF is rendered with pdfium at 300 dpi, one
 bounded chunk at a time, so a long document does not hold every bitmap in
 memory. Detection and recognition for a chunk run in parallel on rayon; the
 Studio follows along through `ocr-progress` events. Because a chunk finishes

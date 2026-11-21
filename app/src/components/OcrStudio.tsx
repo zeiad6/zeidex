@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
   type ModelsStatus,
@@ -20,6 +21,7 @@ import {
   updateRegionText,
 } from "./ocr/edits";
 import { parsePageRange } from "../page-range";
+import { SUPPORTED_DOCUMENT_EXTENSIONS, isSupportedDocument } from "../documents";
 
 type Status =
   | { kind: "idle" }
@@ -28,8 +30,6 @@ type Status =
   | { kind: "done"; message: string };
 
 type EditMode = "regions" | "text";
-
-const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"];
 
 export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: boolean }) {
   const [filePath, setFilePath] = useState<string | null>(null);
@@ -51,8 +51,15 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
   // While the plain-text editor is open its value is local: splitting on every
   // keystroke would collapse the newlines the user is still typing.
   const [draft, setDraft] = useState<string | null>(null);
+  // A drop target only shows while a file is over the window.
+  const [dragging, setDragging] = useState(false);
+  // Whether a recognition run is in flight. Kept apart from `status`, because a
+  // message (an unsupported drop, a preview failure) must not make the run look
+  // finished: the controls stay locked until the command actually returns.
+  const [running, setRunning] = useState(false);
   const unlistenRef = useRef<(() => void) | undefined>(undefined);
   const previewCache = useRef(new Map<string, PagePreview>());
+  const runningRef = useRef(false);
 
   const page = pages[activePage];
   const isPdf = filePath?.toLowerCase().endsWith(".pdf") ?? false;
@@ -147,30 +154,100 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     };
   }, [filePath, activePage, pages.length, previewPage]);
 
+  // One place adopts a document, whether it came from the dialog or a drop.
+  // Swapping the file while a run is in flight is refused: the old file's
+  // results would otherwise land in the new file's panes.
+  const loadFile = useCallback((path: string) => {
+    if (runningRef.current) {
+      setStatus({
+        kind: "error",
+        message: "Wait for the current recognition run to finish.",
+      });
+      return;
+    }
+    previewCache.current.clear();
+    setFilePath(path);
+    setPages([]);
+    setPreview(null);
+    setActivePage(0);
+    setActiveRegion(null);
+    setDraft(null);
+    setProgress(null);
+    setFirstPage("");
+    setLastPage("");
+    setStatus({ kind: "idle" });
+  }, []);
+
   const pickFile = async () => {
+    if (runningRef.current) {
+      setStatus({
+        kind: "error",
+        message: "Wait for the current recognition run to finish.",
+      });
+      return;
+    }
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: "Documents", extensions: [...IMAGE_EXTENSIONS, "pdf"] }],
+        filters: [
+          { name: "Documents", extensions: [...SUPPORTED_DOCUMENT_EXTENSIONS] },
+        ],
       });
-      if (typeof selected !== "string") return;
-      previewCache.current.clear();
-      setFilePath(selected);
-      setPages([]);
-      setPreview(null);
-      setActivePage(0);
-      setActiveRegion(null);
-      setDraft(null);
-      setProgress(null);
-      setFirstPage("");
-      setLastPage("");
-    } catch {
-      // Dialog cancelled or unavailable.
+      if (typeof selected === "string") loadFile(selected);
+    } catch (err) {
+      setStatus({ kind: "error", message: String(err) });
     }
   };
 
+  // The README promises that a scan or a PDF can be dropped into the Studio.
+  // The listener routes the first dropped path through the same `loadFile` the
+  // dialog uses, so both entry points validate and reset identically.
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (!active) return;
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          setDragging(true);
+        } else if (event.payload.type === "leave") {
+          setDragging(false);
+        } else if (event.payload.type === "drop") {
+          setDragging(false);
+          const dropped = event.payload.paths[0];
+          if (!dropped) return;
+          if (!isSupportedDocument(dropped)) {
+            setStatus({
+              kind: "error",
+              message: `Not an image or PDF: ${dropped}`,
+            });
+            return;
+          }
+          loadFile(dropped);
+        }
+      })
+      .then((fn) => {
+        if (active) unlisten = fn;
+        else fn();
+      })
+      .catch((err) => {
+        // Without the channel a drop does nothing; say so instead of leaving
+        // the user dropping files at a window that will never react.
+        if (active) {
+          setStatus({
+            kind: "error",
+            message: `Drag and drop is unavailable: ${String(err)}`,
+          });
+        }
+      });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [loadFile]);
+
   const runOcr = async () => {
-    if (!filePath) return;
+    if (!filePath || runningRef.current) return;
     const range = parsePageRange(firstPage, lastPage);
     if (range.kind === "invalid") {
       setStatus({ kind: "error", message: range.message });
@@ -180,6 +257,10 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     setActiveRegion(null);
     setDraft(null);
     setProgress(null);
+    // The ref is set with the state, not by an effect: a drop can arrive before
+    // the next render and must still see that a run owns the Studio.
+    runningRef.current = true;
+    setRunning(true);
     try {
       const results = !isPdf
         ? [await api.ocrProcessImage(filePath)]
@@ -194,6 +275,9 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     } catch (err) {
       setProgress(null);
       setStatus({ kind: "error", message: String(err) });
+    } finally {
+      runningRef.current = false;
+      setRunning(false);
     }
   };
 
@@ -242,11 +326,22 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
   };
 
   const regions = useMemo(() => page?.layout.regions ?? [], [page]);
-  const working = status.kind === "working";
+  const working = running;
+
 
   return (
     <div className="flex h-full items-center justify-center px-3 py-3">
-      <div className="panel flex h-[94vh] w-[min(1460px,97vw)] flex-col">
+      <div className="panel relative flex h-[94vh] w-[min(1460px,97vw)] flex-col">
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-[inherit] bg-ink-950/75 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-accent-400/40 px-10 py-7 text-center">
+              <Icon name="folder" size={20} className="text-accent-300" />
+              <p className="text-sm font-medium text-white">
+                {rtl ? "أفلت صورة أو ملف PDF لفتحه" : "Drop an image or PDF to open it"}
+              </p>
+            </div>
+          </div>
+        )}
         <header className="relative flex items-center gap-3 px-5 pb-3 pt-4" data-tauri-drag-region>
           <span className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-iris-400/40 to-transparent" />
           <button
@@ -321,7 +416,8 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             <button
               type="button"
               onClick={pickFile}
-              className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
+              disabled={working}
+              className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Icon name="folder" size={13} />
               {rtl ? "فتح ملف" : "Open file"}
