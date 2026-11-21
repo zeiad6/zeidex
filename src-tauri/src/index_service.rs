@@ -43,6 +43,10 @@ pub(crate) enum Request {
         removed: Vec<PathBuf>,
         added: Vec<PathBuf>,
     },
+    /// The watcher's live state changed: a directory stopped being watchable
+    /// or a previously failed one recovered. `None` means live updates are
+    /// complete again. Replaces the standing warning on the status event.
+    WatchWarning { warning: Option<String> },
 }
 
 /// A clonable handle to the worker. Cloning shares the same channel and flags.
@@ -320,6 +324,22 @@ fn run_worker(
                             },
                         );
                     }
+                }
+            }
+            Request::WatchWarning { warning } => {
+                // The watcher retried a directory and either failed again with
+                // a different set or recovered. Emit only on a change: this
+                // channel is shared with path deltas and must not spam.
+                if watch_warning != warning {
+                    watch_warning = warning;
+                    emit(
+                        &app,
+                        IndexStatus {
+                            indexing: false,
+                            count: current_count(&app),
+                            error: status_error(watch_warning.as_deref(), None),
+                        },
+                    );
                 }
             }
         }

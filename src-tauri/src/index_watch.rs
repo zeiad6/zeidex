@@ -11,7 +11,7 @@
 //! deadline; later events never extend it, so a busy directory cannot starve
 //! updates forever.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
@@ -108,7 +108,7 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
     if targets.is_empty() {
         return WatchStart {
             handle: None,
-            warning: None,
+            warning: empty_targets_warning(&app_roots, &file_roots),
         };
     }
 
@@ -135,28 +135,27 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
     // Registration runs here, on the caller's thread, so a backend that cannot
     // watch a root is reported before the worker starts emitting status.
     let mut watched: HashSet<PathBuf> = HashSet::new();
-    let mut failed = 0usize;
-    let mut first_error: Option<String> = None;
+    let mut unwatched = Unwatched::default();
     for target in &targets {
         match watcher.watch(target, RecursiveMode::NonRecursive) {
             Ok(()) => {
                 watched.insert(target.clone());
             }
             Err(err) => {
-                failed += 1;
-                if first_error.is_none() {
-                    first_error = Some(format!("{}: {err}", target.display()));
-                }
-                if failed <= 5 {
+                if unwatched.len() < 5 {
                     eprintln!("zeidex: could not watch {}: {err}", target.display());
                 }
+                unwatched.record(target.clone(), format!("{}: {err}", target.display()));
             }
         }
     }
-    if failed > 5 {
-        eprintln!("zeidex: {failed} watch registrations failed in total");
+    if unwatched.len() > 5 {
+        eprintln!(
+            "zeidex: {} watch registrations failed in total",
+            unwatched.len()
+        );
     }
-    let warning = registration_warning(watched.len(), failed, first_error.as_deref());
+    let warning = unwatched.warning(watched.len());
     if let Some(message) = &warning {
         eprintln!("zeidex: {message}");
     }
@@ -173,9 +172,20 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
         app_depth,
         file_depth,
     };
+    let initial_warning = warning.clone();
     let join = thread::Builder::new()
         .name("zeidex-watch".to_string())
-        .spawn(move || run(rx, watcher, watched, roots, requests));
+        .spawn(move || {
+            run(
+                rx,
+                watcher,
+                watched,
+                unwatched,
+                roots,
+                requests,
+                initial_warning,
+            )
+        });
     match join {
         Ok(join) => WatchStart {
             handle: Some(WatchHandle {
@@ -232,6 +242,78 @@ fn registration_warning(
     })
 }
 
+/// Why live updates are off when no directory could even be considered.
+///
+/// A user with no roots configured is not warned — there is nothing to watch.
+/// A configured root that does not exist is: an unmounted drive silently turns
+/// live updates off, and the index status count keeps showing stale entries.
+fn empty_targets_warning(app_roots: &[String], file_roots: &[String]) -> Option<String> {
+    let configured = app_roots
+        .iter()
+        .chain(file_roots.iter())
+        .any(|root| !root.trim().is_empty());
+    configured.then(|| {
+        "live index updates are off: none of the configured index roots exist on this system"
+            .to_string()
+    })
+}
+
+/// Directories whose watch registration failed, with the backend's reason.
+///
+/// A failed directory is retried when an event mentions it again — a freed
+/// inotify slot or a changed permission can make it work — so recovery removes
+/// the entry and the warning is rebuilt from the live set. Reasons are capped:
+/// the count stays exact for a pathologically large failure set, the memory
+/// does not.
+#[derive(Default)]
+struct Unwatched {
+    reasons: HashMap<PathBuf, String>,
+}
+
+/// How many failure reasons are kept for the message; the rest are counted.
+const MAX_REASONS: usize = 64;
+
+impl Unwatched {
+    fn record(&mut self, path: PathBuf, reason: String) {
+        if self.reasons.len() >= MAX_REASONS && !self.reasons.contains_key(&path) {
+            self.reasons.insert(path, String::new());
+        } else {
+            self.reasons.insert(path, reason);
+        }
+    }
+
+    fn forget(&mut self, path: &Path) {
+        self.reasons.remove(path);
+    }
+
+    /// Drops failures at or under a path that disappeared.
+    fn retain_under(&mut self, path: &Path) {
+        let Some(path) = path.to_str() else {
+            return;
+        };
+        self.reasons.retain(|entry, _| {
+            entry
+                .to_str()
+                .is_none_or(|entry| !path_is_same_or_child(entry, path))
+        });
+    }
+
+    fn len(&self) -> usize {
+        self.reasons.len()
+    }
+
+    fn first_reason(&self) -> Option<&str> {
+        self.reasons
+            .values()
+            .map(String::as_str)
+            .find(|reason| !reason.is_empty())
+    }
+
+    fn warning(&self, watched: usize) -> Option<String> {
+        registration_warning(watched, self.reasons.len(), self.first_reason())
+    }
+}
+
 /// Directories to register, each watched non-recursively.
 ///
 /// `max_depth` counts in scan-depth units: a directory at depth `d` is watched
@@ -281,8 +363,10 @@ fn run(
     rx: Receiver<Message>,
     mut watcher: RecommendedWatcher,
     mut watched: HashSet<PathBuf>,
+    mut unwatched: Unwatched,
     roots: Roots,
     requests: Sender<Request>,
+    mut last_warning: Option<String>,
 ) {
     let mut pending = Delta::default();
     let mut deadline: Option<Instant> = None;
@@ -297,7 +381,20 @@ fn run(
                 // has no watch of its own. Register it (and its reachable
                 // children) before its own events can be missed; a path that
                 // disappeared releases its entries instead.
-                sync_watches(&mut watcher, &mut watched, &event.paths, &roots);
+                sync_watches(
+                    &mut watcher,
+                    &mut watched,
+                    &mut unwatched,
+                    &event.paths,
+                    &roots,
+                );
+                // A registration that fails after startup must reach the UI
+                // too: the standing warning changes only when the set does.
+                let warning = unwatched.warning(watched.len());
+                if warning != last_warning {
+                    last_warning = warning.clone();
+                    let _ = requests.send(Request::WatchWarning { warning });
+                }
                 if apply_event(&event, &roots.apps, &roots.files, &mut pending)
                     && deadline.is_none()
                 {
@@ -327,9 +424,11 @@ fn run(
 fn sync_watches(
     watcher: &mut RecommendedWatcher,
     watched: &mut HashSet<PathBuf>,
+    unwatched: &mut Unwatched,
     paths: &[PathBuf],
     roots: &Roots,
 ) {
+    let mut printed = 0usize;
     for path in paths {
         let Some(path_str) = path.to_str() else {
             continue;
@@ -340,6 +439,7 @@ fn sync_watches(
                     .to_str()
                     .is_some_and(|entry_str| !path_is_same_or_child(entry_str, path_str))
             });
+            unwatched.retain_under(path);
             continue;
         }
         if !path.is_dir() {
@@ -368,12 +468,21 @@ fn sync_watches(
             continue;
         }
         for dir in watch_targets(path_str, depth - dir_depth, skip_bundles) {
-            if !watched.insert(dir.clone()) {
+            if watched.contains(&dir) {
                 continue;
             }
-            if let Err(err) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
-                watched.remove(&dir);
-                eprintln!("zeidex: could not watch {}: {err}", dir.display());
+            match watcher.watch(&dir, RecursiveMode::NonRecursive) {
+                Ok(()) => {
+                    watched.insert(dir.clone());
+                    unwatched.forget(&dir);
+                }
+                Err(err) => {
+                    if printed < 3 {
+                        printed += 1;
+                        eprintln!("zeidex: could not watch {}: {err}", dir.display());
+                    }
+                    unwatched.record(dir, err.to_string());
+                }
             }
         }
     }
@@ -474,9 +583,10 @@ pub(crate) fn apply_event(
 
 #[cfg(test)]
 mod tests {
-    use super::{Delta, apply_event, registration_warning};
+    use super::{Delta, Unwatched, apply_event, empty_targets_warning, registration_warning};
     use notify::event::{CreateKind, ModifyKind, RemoveKind};
     use notify::{Event, EventKind};
+    use std::path::{Path, PathBuf};
 
     fn event(kind: EventKind, paths: &[&str]) -> Event {
         let mut event = Event::new(kind);
@@ -610,6 +720,69 @@ mod tests {
     #[test]
     fn a_clean_watch_has_no_warning() {
         assert_eq!(registration_warning(12, 0, None), None);
+    }
+
+    #[test]
+    fn missing_configured_roots_are_reported_but_no_roots_are_not() {
+        assert_eq!(empty_targets_warning(&[], &[]), None);
+        assert_eq!(empty_targets_warning(&["  ".into()], &[]), None);
+
+        let warning = empty_targets_warning(&["/media/usb".into()], &[])
+            .expect("a configured root that is not there must warn");
+        assert!(warning.starts_with("live index updates are off"));
+        assert!(warning.contains("none of the configured index roots exist"));
+    }
+
+    #[test]
+    fn the_warning_follows_failures_and_recovery() {
+        let mut unwatched = Unwatched::default();
+        assert_eq!(unwatched.warning(4), None);
+
+        unwatched.record(PathBuf::from("/home/u/one"), "permission denied".into());
+        let partial = unwatched.warning(4).expect("one failure is partial");
+        assert!(
+            partial.contains("1 directory could not be watched"),
+            "{partial}"
+        );
+        assert!(partial.contains("permission denied"));
+
+        unwatched.record(PathBuf::from("/home/u/two"), "watch limit reached".into());
+        let two = unwatched.warning(4).expect("two failures is still partial");
+        assert!(two.contains("2 directories could not be watched"), "{two}");
+
+        unwatched.forget(Path::new("/home/u/one"));
+        unwatched.forget(Path::new("/home/u/two"));
+        assert_eq!(
+            unwatched.warning(4),
+            None,
+            "recovery must clear the warning, not leave a stale one"
+        );
+    }
+
+    #[test]
+    fn a_removed_subtree_is_dropped_from_the_failure_set() {
+        let mut unwatched = Unwatched::default();
+        unwatched.record(PathBuf::from("/home/u/docs/a"), "denied".into());
+        unwatched.record(PathBuf::from("/home/u/docs/b"), "denied".into());
+        unwatched.record(PathBuf::from("/home/u/other"), "denied".into());
+
+        unwatched.retain_under(Path::new("/home/u/docs"));
+
+        assert_eq!(unwatched.len(), 1, "only the unrelated path survives");
+        assert_eq!(
+            unwatched.warning(2),
+            registration_warning(2, 1, Some("denied"))
+        );
+    }
+
+    #[test]
+    fn reasons_are_capped_but_the_count_stays_exact() {
+        let mut unwatched = Unwatched::default();
+        for index in 0..(super::MAX_REASONS + 5) {
+            unwatched.record(PathBuf::from(format!("/roots/{index}")), "denied".into());
+        }
+        assert_eq!(unwatched.len(), super::MAX_REASONS + 5);
+        assert_eq!(unwatched.first_reason(), Some("denied"));
     }
 
     #[test]

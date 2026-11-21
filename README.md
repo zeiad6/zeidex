@@ -362,10 +362,11 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - **Live index updates depend on the platform watcher.** inotify, FSEvents and
   ReadDirectoryChangesW are used through `notify`; if the backend cannot start (a
   container without inotify, an exhausted watch limit), the app shows the reason in
-  the launcher and in Settings, and the Reindex button remains the fallback. A
-  partial registration is reported the same way, with the number of directories
-  that could not be watched. Directories reachable only through a symlink are
-  indexed by the walk but do not receive live updates.
+  the launcher and in Settings, and the Reindex button remains the fallback. The same
+  warning appears when a directory fails to register later or when a configured root
+  no longer exists, and it clears itself when the watch recovers. Directories
+  reachable only through a symlink are indexed by the walk but do not receive live
+  updates.
 
 ## Roadmap
 
