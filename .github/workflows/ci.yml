@@ -152,8 +152,13 @@ jobs:
         run: npm test
         working-directory: app
 
-      - name: Clippy shell
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Format shell
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Clippy shell (production paths deny unwrap/expect)
+        run: >-
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+          -- -D warnings -D clippy::unwrap_used -D clippy::expect_used
 
       - name: Shell unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
