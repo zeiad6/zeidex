@@ -54,12 +54,12 @@ installer.
 
 ## Downloads
 
-| Platform | Package | Best for |
-| --- | --- | --- |
-| **Windows 10/11 (x64)** | `Zeidex Studio_0.1.0_x64_en-US.msi` | Standard installer, per-machine or per-user, WiX-based. |
-| **Windows 10/11 (x64)** | `Zeidex Studio_0.1.0_x64-setup.exe` | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
-| **Linux (x86_64)** | `zeidex-studio_0.1.0_amd64.deb` | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
-| **Linux (x86_64)** | `zeidex-studio_0.1.0_amd64.AppImage` | Any distribution; no installation, no root. |
+| Platform | Package | Size | Best for |
+| --- | --- | --- | --- |
+| **Windows 10/11 (x64)** | `Zeidex.Studio_0.1.0_x64_en-US.msi` | 47 MB | Standard installer, per-machine or per-user, WiX-based. |
+| **Windows 10/11 (x64)** | `Zeidex.Studio_0.1.0_x64-setup.exe` | 43 MB | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
+| **Linux (x86_64)** | `Zeidex.Studio_0.1.0_amd64.deb` | 52 MB | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
+| **Linux (x86_64)** | `Zeidex.Studio_0.1.0_amd64.AppImage` | 125 MB | Any distribution; no installation, no root. |
 
 > Builds are produced on GitHub's native runners from the tagged source, so every
 > artifact matches the commit behind this release. macOS bundles are not part of
@@ -70,26 +70,26 @@ installer.
 **Windows — MSI**
 
 ```powershell
-msiexec /i "Zeidex Studio_0.1.0_x64_en-US.msi"
+msiexec /i "Zeidex.Studio_0.1.0_x64_en-US.msi"
 ```
 
 **Windows — NSIS**
 
 ```powershell
-"Zeidex Studio_0.1.0_x64-setup.exe"
+"Zeidex.Studio_0.1.0_x64-setup.exe"
 ```
 
 **Debian / Ubuntu**
 
 ```bash
-sudo apt install ./zeidex-studio_0.1.0_amd64.deb
+sudo apt install ./Zeidex.Studio_0.1.0_amd64.deb
 ```
 
 **AppImage**
 
 ```bash
-chmod +x zeidex-studio_0.1.0_amd64.AppImage
-./zeidex-studio_0.1.0_amd64.AppImage
+chmod +x "Zeidex.Studio_0.1.0_amd64.AppImage"
+./"Zeidex.Studio_0.1.0_amd64.AppImage"
 ```
 
 The Linux packages depend on `libwebkit2gtk-4.1-0`, `libgtk-3-0` and
