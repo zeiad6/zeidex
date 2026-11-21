@@ -222,8 +222,12 @@ make tauri-build          # release bundles for the current OS
 ```
 
 `make tauri-build` produces `.deb` + `.appimage` on Linux, `.msi` + `.nsis` on
-Windows, and `.dmg` on macOS. No prebuilt installers are published yet — the app
-depends on platform ONNX Runtime and pdfium builds, which are not vendored here.
+Windows, and `.dmg` on macOS. Nothing is committed: pushing a `v*` tag runs
+`.github/workflows/release.yml`, which builds on native runners and attaches the
+bundles to a draft release. MSI is built on Windows because WiX cannot run on
+Linux. ONNX Runtime and pdfium are staged into the bundle by that workflow; a
+local build uses whatever is in `src-tauri/resources/lib/` (see
+[build and release](assets/docs/build-and-release.md)).
 
 ### Verify the build
 
@@ -320,8 +324,9 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - **OCR is CPU-bound.** A 300 dpi A4 page takes several seconds on a laptop and minutes
   for a 40-page PDF. Detection caps the long side at 1600 px by default
   (`OcrEngineConfig::det_max_side`) so memory stays bounded on long documents.
-- **Runtime libraries are external.** ONNX Runtime and pdfium are loaded dynamically and
-  are not shipped in this repository.
+- **Runtime libraries are not committed.** ONNX Runtime and pdfium are loaded
+  dynamically; release bundles stage them, while a source build needs them in
+  `src-tauri/resources/lib/` or on the system loader path.
 - **Models are downloaded, never committed.** `scripts/fetch_models.sh` pulls nine files
   from Hugging Face mirrors and verifies them against `third_party/models/SHA256SUMS`.
 
@@ -332,7 +337,9 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - [x] Editable regions and tables in the Studio
 - [x] `.docx` / `.xlsx` export with RTL support
 - [x] Full RTL interface
-- [ ] Better Arabic recognizer (dense lines, Arabic-Indic digits)
+- [ ] Better Arabic recognizer (dense lines, Arabic-Indic digits) — evaluate
+      [`arabic_PP-OCRv5_mobile_rec_onnx`](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx)
+      (8 MB, same 48 px CTC decoder)
 - [ ] Handwriting and low-quality photo handling
 - [ ] Page-range selection when exporting a PDF
 - [ ] Signed installers for macOS, Windows and Linux
@@ -355,6 +362,22 @@ it covers the commit style, the test gates, and the clippy rules (production pat
 make core-test && make core-fmt && make core-clippy && make frontend-build
 ```
 
+## Developer
+
+<table>
+  <tr>
+    <td width="96" align="center">
+      <img src="assets/brand/zeidex-mark.svg" width="72" height="72" alt="Zeidexsoft">
+    </td>
+    <td>
+      <b>Zeidexsoft</b> — fast, local-first apps that respect your privacy.<br>
+      Maintainer: <a href="https://github.com/zeiad6">@zeiad6</a> · Website: <a href="https://zeidexsoft.com">zeidexsoft.com</a> · Developer card: <a href="https://zeidexlink.zeidexsoft.com/zeidex">zeidexlink.zeidexsoft.com/zeidex</a>
+    </td>
+  </tr>
+</table>
+
+Support and suggestions: open an [issue](https://github.com/cavaldos/zeidex/issues) or reach the developer via the [developer card](https://zeidexlink.zeidexsoft.com/zeidex).
+
 ## Licence and attribution
 
 Zeidex Studio is free software under the **GNU General Public License v3.0 or later**.
@@ -362,6 +385,8 @@ You may use it privately, at work, and commercially; if you distribute it or a m
 version, the source must stay available under the same licence and the copyright notices
 must be preserved. If you need to embed it in a closed-source product, contact the
 copyright holder to discuss a separate commercial licence.
+
+Copyright © 2026 Zeidexsoft.
 
 This project is a derivative of [`kunkka19xx/look`](https://github.com/kunkka19xx/look)
 (GPL-3.0). The original macOS shell is preserved under `legacy/` for reference. Model and

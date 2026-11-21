@@ -57,9 +57,11 @@ CI (`.github/workflows/ci.yml`) runs on pull requests and manual dispatch:
 
 ## Bundling
 
-`npm run tauri build` (from `app/`) produces the per-platform bundles listed in
-`src-tauri/tauri.conf.json`: `.deb`, `.AppImage`, `.msi`, `.nsis` and `.dmg`.
-The bundle icons live in `src-tauri/icons/`.
+`make tauri-build` (from the repository root, where `src-tauri/` is visible)
+produces the bundles listed in `src-tauri/tauri.conf.json`: `.deb`, `.AppImage`,
+`.msi`, `.nsis` and `.dmg`. The Tauri CLI must see `src-tauri/`; running it from
+`app/` fails because the shell lives one level up. The bundle icons live in
+`src-tauri/icons/`.
 
 `bundle.resources` in `src-tauri/tauri.conf.json` copies:
 
@@ -78,6 +80,9 @@ resolves the model directory as: `ZEIDEX_MODELS_DIR` → bundled
 `<resources>/models` → a development checkout (`third_party/models`) → the
 per-user data dir.
 
-Release automation (tag → DMG → appcast → Homebrew) is not carried over from the
-macOS shell yet; see `legacy/` for the old `release.yml`, `build.sh` and
-`notify-update.sh`. The Tauri shell has no update checker.
+Release automation lives in `.github/workflows/release.yml`: on a `v*` tag (or a
+manual dispatch) it builds `.deb` + `.AppImage` on Ubuntu and `.msi` + `.nsis`
+on Windows, stages ONNX Runtime and pdfium next to the executable, and uploads
+the bundles to the GitHub release. MSI is built on a Windows runner because WiX
+cannot run on Linux. The old macOS DMG/appcast/Homebrew pipeline is still in
+`legacy/` and not wired up for the Tauri shell.

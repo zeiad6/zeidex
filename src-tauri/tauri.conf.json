@@ -37,7 +37,16 @@
   },
   "bundle": {
     "active": true,
-    "copyright": "GPL-3.0-or-later",
+    "copyright": "Copyright © 2026 Zeidexsoft",
+    "publisher": "Zeidexsoft",
+    "category": "Utility",
+    "shortDescription": "Offline launcher and document OCR studio",
+    "longDescription": "Zeidex Studio is a cross-platform launcher and offline document AI: fuzzy app, file and folder search, clipboard history, an inline calculator, translation, and a document studio that turns scans and PDFs into editable Word and Excel files. No account, no telemetry, and no cloud OCR.",
+    "linux": {
+      "deb": {
+        "section": "utils"
+      }
+    },
     "targets": [
       "deb",
       "appimage",

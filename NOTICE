@@ -1,5 +1,5 @@
 Zeidex Studio
-Copyright (C) 2026 cavaldos <https://github.com/cavaldos>
+Copyright (C) 2026 Zeidexsoft <https://zeidexsoft.com>
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -44,6 +44,8 @@ Third-party components
   `scripts/fetch_models.sh`. The models are not distributed from this
   repository; the script fetches them at build time and verifies SHA-256 sums.
 - ONNX Runtime — MIT License.
+- PDFium — BSD 3-Clause License (Copyright 2014 Google Inc.), loaded
+  dynamically for local PDF rasterisation.
 - Tauri, React, Tailwind CSS and the Rust crates in `Cargo.lock` — under their
   respective licences, as listed in each package's metadata.
 

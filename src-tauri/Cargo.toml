@@ -5,7 +5,7 @@ description = "Zeidex Studio — cross-platform launcher and offline document OC
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
-authors = ["cavaldos"]
+authors = ["Zeidexsoft"]
 
 [lib]
 # The lib is the Tauri entry point; the binary just calls it. Tauri links it as

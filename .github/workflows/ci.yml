@@ -73,13 +73,15 @@ jobs:
         run: sha256sum -c third_party/models/SHA256SUMS
 
       # The `ort` crate is built with `load-dynamic`, so the runtime is not
-      # linked at build time and has to be present for the tests.
+      # linked at build time and has to be present for the tests. The GitHub
+      # release has no binary assets any more, so take the official NuGet
+      # package (same Microsoft-signed binaries).
       - name: Install ONNX Runtime
         run: |
-          curl -fsSL -o /tmp/ort.tgz \
-            https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-1.30.0.tgz
-          tar -xzf /tmp/ort.tgz -C /tmp
-          echo "ORT_DYLIB_PATH=/tmp/onnxruntime-linux-x64-1.30.0/lib/libonnxruntime.so" >> "$GITHUB_ENV"
+          curl -fsSL -o /tmp/ort.nupkg \
+            https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime/1.30.0
+          unzip -q /tmp/ort.nupkg 'runtimes/linux-x64/native/libonnxruntime.so' -d /tmp/ort
+          echo "ORT_DYLIB_PATH=/tmp/ort/runtimes/linux-x64/native/libonnxruntime.so" >> "$GITHUB_ENV"
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@2

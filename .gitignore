@@ -110,3 +110,8 @@ apps/linows/LINUX-REVIEW.md
 ./skills-lock.json
 
 .pi
+
+# Runtime libraries staged for a local bundle (see docs/build-and-release.md)
+src-tauri/resources/lib/*.so
+src-tauri/resources/lib/*.dylib
+src-tauri/resources/lib/*.dll

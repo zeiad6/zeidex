@@ -39,10 +39,10 @@ frontend-build:
 	cd $(APP_DIR) && npm run build
 
 tauri-dev:
-	cd $(APP_DIR) && npm run tauri dev
+	./app/node_modules/.bin/tauri dev
 
 tauri-build:
-	cd $(APP_DIR) && npm run tauri build
+	./app/node_modules/.bin/tauri build
 
 ocr-test:
 	@test -f third_party/models/ppocrv4_det.onnx || \

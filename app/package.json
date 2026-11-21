@@ -2,6 +2,7 @@
   "name": "zeidex-app",
   "private": true,
   "version": "0.1.0",
+  "author": "Zeidexsoft <https://zeidexsoft.com>",
   "type": "module",
   "scripts": {
     "dev": "vite",
