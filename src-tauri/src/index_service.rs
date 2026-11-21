@@ -201,14 +201,19 @@ fn run_worker(
                     },
                 );
                 let config = RuntimeConfig::load_cached();
+                // Register the watch BEFORE walking. A walk of a large tree
+                // takes seconds; a file created behind the walker's cursor
+                // would otherwise be invisible until some later event. Events
+                // that arrive while this thread walks are queued by the
+                // watcher and applied right after. Restarting also picks up
+                // changed roots and depth, which is why it happens here and
+                // not only when settings change.
+                watch = restart_watch(watch.take(), request_tx.clone(), &config);
                 let db_path = db_path(&app);
                 let result = QueryEngine::bootstrap_sqlite(&db_path);
                 match result {
                     Ok(()) => {
                         built.store(true, Ordering::Release);
-                        // Roots and depth may have changed. Restarting is
-                        // cheaper than diffing watch sets and keeps one owner.
-                        watch = restart_watch(watch.take(), request_tx.clone(), &config);
                         let count = reload_count(&app);
                         emit(
                             &app,

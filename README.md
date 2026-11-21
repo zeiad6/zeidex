@@ -359,10 +359,16 @@ why the OCR and export logic can be tested in CI on two operating systems.
   `src-tauri/resources/lib/` or on the system loader path.
 - **Models are downloaded, never committed.** `scripts/fetch_models.sh` pulls nine files
   from Hugging Face mirrors and verifies them against `third_party/models/SHA256SUMS`.
+- **Live index updates depend on the platform watcher.** inotify, FSEvents and
+  ReadDirectoryChangesW are used through `notify`; if the backend cannot start (a
+  container without inotify, an exhausted watch limit), the app says so in its log and
+  the Reindex button remains the fallback. Directories reachable only through a symlink
+  are indexed by the walk but do not receive live updates.
 
 ## Roadmap
 
 - [x] Cross-platform Tauri shell replacing the macOS-only SwiftUI app
+- [x] Live, incremental index updates from a bounded filesystem watcher
 - [x] Offline OCR: layout, text lines, tables, Arabic BiDi
 - [x] Editable regions and tables in the Studio
 - [x] `.docx` / `.xlsx` export with RTL support
