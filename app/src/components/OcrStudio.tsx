@@ -88,17 +88,24 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
 
   useEffect(() => {
     let active = true;
+    // A page is OCRed inside a rayon chunk, so `page_done` arrives in completion
+    // order, not page order. Counting the completed pages keeps the bar and the
+    // message monotonic; using `event.page + 1` made them jump backwards.
+    const finished = new Set<number>();
     api
       .onOcrProgress((event: PipelineProgress) => {
         if (!active) return;
         if (event.type === "started") {
+          finished.clear();
           setProgress({ done: 0, total: event.pages });
           setStatus({ kind: "working", message: `${event.pages} pages queued` });
         } else if (event.type === "page_done") {
-          setProgress({ done: event.page + 1, total: event.pages });
+          if (event.page < event.pages) finished.add(event.page);
+          const done = Math.min(finished.size, event.pages);
+          setProgress({ done, total: event.pages });
           setStatus({
             kind: "working",
-            message: `page ${event.page + 1}/${event.pages}`,
+            message: `page ${done}/${event.pages}`,
           });
         }
       })
@@ -414,17 +421,23 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             />
 
             {working && progress && progress.total > 1 && (
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={progress.total}
-                aria-valuenow={progress.done}
-                className="h-1 overflow-hidden rounded-full bg-white/10"
-              >
+              <div className="flex items-center gap-2">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-accent-400 to-iris-400 transition-[width] duration-300"
-                  style={{ width: `${(progress.done / progress.total) * 100}%` }}
-                />
+                  role="progressbar"
+                  aria-label={rtl ? "تقدم قراءة الصفحات" : "Page progress"}
+                  aria-valuemin={0}
+                  aria-valuemax={progress.total}
+                  aria-valuenow={progress.done}
+                  className="h-1 flex-1 overflow-hidden rounded-full bg-white/10"
+                >
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-accent-400 to-iris-400 transition-[width] duration-300"
+                    style={{ width: `${(progress.done / progress.total) * 100}%` }}
+                  />
+                </div>
+                <span className="font-mono text-[0.62rem] tabular-nums text-zinc-500">
+                  {progress.done}/{progress.total}
+                </span>
               </div>
             )}
 

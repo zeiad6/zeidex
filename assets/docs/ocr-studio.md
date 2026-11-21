@@ -15,7 +15,9 @@ The file dialog accepts `png`, `jpg`, `jpeg`, `tif`, `tiff`, `bmp`, `webp` and
 `pdf`. An image becomes one page. A PDF is rendered with pdfium at 300 dpi, one
 bounded chunk at a time, so a long document does not hold every bitmap in
 memory. Detection and recognition for a chunk run in parallel on rayon; the
-Studio follows along through `ocr-progress` events.
+Studio follows along through `ocr-progress` events. Because a chunk finishes
+pages in whatever order rayon schedules them, the bar counts completed pages
+instead of trusting the last page number it was told about.
 
 For a long PDF, the two boxes beside **Run OCR** take a 1-based, inclusive page
 window; both empty means every page. A window validates against the real page
