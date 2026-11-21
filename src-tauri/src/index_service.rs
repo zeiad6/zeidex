@@ -189,6 +189,10 @@ fn run_worker(
     rerun: Arc<AtomicBool>,
 ) {
     let mut watch: Option<WatchHandle> = None;
+    // Why live updates are off or partial, if they are. Kept for the life of
+    // the worker and repeated in every status so a warning cannot be missed by
+    // a frontend that subscribed after the first event.
+    let mut watch_warning: Option<String> = None;
     while let Ok(request) = rx.recv() {
         match request {
             Request::Full { reply } => {
@@ -197,7 +201,7 @@ fn run_worker(
                     IndexStatus {
                         indexing: true,
                         count: current_count(&app),
-                        error: None,
+                        error: status_error(watch_warning.as_deref(), None),
                     },
                 );
                 let config = RuntimeConfig::load_cached();
@@ -208,7 +212,9 @@ fn run_worker(
                 // watcher and applied right after. Restarting also picks up
                 // changed roots and depth, which is why it happens here and
                 // not only when settings change.
-                watch = restart_watch(watch.take(), request_tx.clone(), &config);
+                let started = restart_watch(watch.take(), request_tx.clone(), &config);
+                watch = started.handle;
+                watch_warning = started.warning;
                 let db_path = db_path(&app);
                 let result = QueryEngine::bootstrap_sqlite(&db_path);
                 match result {
@@ -220,7 +226,7 @@ fn run_worker(
                             IndexStatus {
                                 indexing: false,
                                 count,
-                                error: None,
+                                error: status_error(watch_warning.as_deref(), None),
                             },
                         );
                         if let Some(reply) = reply {
@@ -236,7 +242,10 @@ fn run_worker(
                             IndexStatus {
                                 indexing: false,
                                 count: current_count(&app),
-                                error: Some(message.clone()),
+                                error: status_error(
+                                    watch_warning.as_deref(),
+                                    Some(message.clone()),
+                                ),
                             },
                         );
                         if let Some(reply) = reply {
@@ -262,7 +271,7 @@ fn run_worker(
                             IndexStatus {
                                 indexing: false,
                                 count,
-                                error: None,
+                                error: status_error(watch_warning.as_deref(), None),
                             },
                         );
                     }
@@ -274,7 +283,7 @@ fn run_worker(
                             IndexStatus {
                                 indexing: false,
                                 count: current_count(&app),
-                                error: Some(message),
+                                error: status_error(watch_warning.as_deref(), Some(message)),
                             },
                         );
                     }
@@ -294,7 +303,7 @@ fn run_worker(
                                 IndexStatus {
                                     indexing: false,
                                     count,
-                                    error: None,
+                                    error: status_error(watch_warning.as_deref(), None),
                                 },
                             );
                         }
@@ -307,7 +316,7 @@ fn run_worker(
                             IndexStatus {
                                 indexing: false,
                                 count: current_count(&app),
-                                error: Some(message),
+                                error: status_error(watch_warning.as_deref(), Some(message)),
                             },
                         );
                     }
@@ -321,9 +330,20 @@ fn restart_watch(
     old: Option<WatchHandle>,
     requests: Sender<Request>,
     config: &RuntimeConfig,
-) -> Option<WatchHandle> {
+) -> crate::index_watch::WatchStart {
     drop(old);
     crate::index_watch::start(requests, config)
+}
+
+/// One message for the status event: an operation error and a standing watcher
+/// warning can both be true, and losing either is how a failure becomes silent.
+fn status_error(watch_warning: Option<&str>, operation: Option<String>) -> Option<String> {
+    match (watch_warning, operation) {
+        (None, None) => None,
+        (Some(warning), None) => Some(warning.to_string()),
+        (None, Some(error)) => Some(error),
+        (Some(warning), Some(error)) => Some(format!("{error} ({warning})")),
+    }
 }
 
 fn db_path(app: &AppHandle) -> PathBuf {
@@ -353,8 +373,25 @@ fn emit(app: &AppHandle, status: IndexStatus) {
 
 #[cfg(test)]
 mod tests {
-    use super::{claim_full, finish_full};
+    use super::{claim_full, finish_full, status_error};
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn a_standing_watch_warning_reaches_the_status() {
+        assert_eq!(status_error(None, None), None);
+        assert_eq!(
+            status_error(Some("live index updates are off"), None).as_deref(),
+            Some("live index updates are off")
+        );
+        assert_eq!(
+            status_error(None, Some("database is busy".to_string())).as_deref(),
+            Some("database is busy")
+        );
+        let both = status_error(Some("partial watch"), Some("database is busy".to_string()))
+            .expect("both messages survive");
+        assert!(both.contains("database is busy"));
+        assert!(both.contains("partial watch"));
+    }
 
     #[test]
     fn a_second_request_during_a_walk_is_remembered_not_dropped() {

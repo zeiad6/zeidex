@@ -548,6 +548,20 @@ export default function Launcher({
           )}
 
           <span className="ms-auto flex items-center gap-2">
+            {indexStatus?.error && (
+              <span
+                role="status"
+                title={indexStatus.error}
+                aria-label={
+                  rtl
+                    ? `تحذير الفهرس: ${indexStatus.error}`
+                    : `Index warning: ${indexStatus.error}`
+                }
+                className="text-amber-300"
+              >
+                <Icon name="alert" size={12} />
+              </span>
+            )}
             {notice && (
               <span role="status" aria-live="polite" className="max-w-[16rem] truncate text-zinc-400">
                 {notice}

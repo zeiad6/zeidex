@@ -69,7 +69,17 @@ struct Roots {
     file_depth: usize,
 }
 
-pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> Option<WatchHandle> {
+/// Result of trying to start the watcher.
+///
+/// `warning` is user-facing: it explains why live updates are off or partial.
+/// The caller puts it in every index-status event, so a desktop launch does not
+/// lose the reason to a stderr nobody sees.
+pub(crate) struct WatchStart {
+    pub handle: Option<WatchHandle>,
+    pub warning: Option<String>,
+}
+
+pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchStart {
     let mut app_roots = config.app_scan_roots.clone();
     app_roots.sort();
     app_roots.dedup();
@@ -96,37 +106,130 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> Option
     targets.sort();
     targets.dedup();
     if targets.is_empty() {
-        return None;
+        return WatchStart {
+            handle: None,
+            warning: None,
+        };
     }
 
     let (control, rx) = mpsc::channel();
     let event_tx = control.clone();
-    let join = thread::Builder::new()
-        .name("zeidex-watch".to_string())
-        .spawn(move || {
-            run(
-                rx,
-                event_tx,
-                requests,
-                Roots {
-                    apps: app_roots,
-                    files: file_roots,
-                    app_depth,
-                    file_depth,
-                },
-                targets,
-            )
-        });
-    match join {
-        Ok(join) => Some(WatchHandle {
-            control,
-            join: Some(join),
-        }),
+    let mut watcher = match RecommendedWatcher::new(
+        move |result| {
+            let _ = event_tx.send(Message::Event(result));
+        },
+        notify::Config::default(),
+    ) {
+        Ok(watcher) => watcher,
         Err(err) => {
-            eprintln!("zeidex: could not start the file watcher: {err}");
-            None
+            let warning =
+                format!("live index updates are off: the file watcher could not start: {err}");
+            eprintln!("zeidex: {warning}");
+            return WatchStart {
+                handle: None,
+                warning: Some(warning),
+            };
+        }
+    };
+
+    // Registration runs here, on the caller's thread, so a backend that cannot
+    // watch a root is reported before the worker starts emitting status.
+    let mut watched: HashSet<PathBuf> = HashSet::new();
+    let mut failed = 0usize;
+    let mut first_error: Option<String> = None;
+    for target in &targets {
+        match watcher.watch(target, RecursiveMode::NonRecursive) {
+            Ok(()) => {
+                watched.insert(target.clone());
+            }
+            Err(err) => {
+                failed += 1;
+                if first_error.is_none() {
+                    first_error = Some(format!("{}: {err}", target.display()));
+                }
+                if failed <= 5 {
+                    eprintln!("zeidex: could not watch {}: {err}", target.display());
+                }
+            }
         }
     }
+    if failed > 5 {
+        eprintln!("zeidex: {failed} watch registrations failed in total");
+    }
+    let warning = registration_warning(watched.len(), failed, first_error.as_deref());
+    if let Some(message) = &warning {
+        eprintln!("zeidex: {message}");
+    }
+    if watched.is_empty() {
+        return WatchStart {
+            handle: None,
+            warning,
+        };
+    }
+
+    let roots = Roots {
+        apps: app_roots,
+        files: file_roots,
+        app_depth,
+        file_depth,
+    };
+    let join = thread::Builder::new()
+        .name("zeidex-watch".to_string())
+        .spawn(move || run(rx, watcher, watched, roots, requests));
+    match join {
+        Ok(join) => WatchStart {
+            handle: Some(WatchHandle {
+                control,
+                join: Some(join),
+            }),
+            warning,
+        },
+        Err(err) => {
+            let message =
+                format!("live index updates are off: the watcher thread could not start: {err}");
+            eprintln!("zeidex: {message}");
+            let warning = match warning {
+                Some(partial) => Some(format!("{partial}; {message}")),
+                None => Some(message),
+            };
+            WatchStart {
+                handle: None,
+                warning,
+            }
+        }
+    }
+}
+
+/// One sentence for the UI when some or all watch registrations failed.
+///
+/// A partial set is not fatal — the un-watched directories fall back to the
+/// manual Reindex — but it is the difference between "live" and "sometimes
+/// live", so it is reported rather than hidden behind a successful startup.
+fn registration_warning(
+    watched: usize,
+    failed: usize,
+    first_error: Option<&str>,
+) -> Option<String> {
+    if failed == 0 {
+        return None;
+    }
+    if watched == 0 {
+        return Some(match first_error {
+            Some(err) => {
+                format!("live index updates are off: no index root could be watched ({err})")
+            }
+            None => "live index updates are off: no index root could be watched".to_string(),
+        });
+    }
+    let directories = if failed == 1 {
+        "1 directory could not be watched".to_string()
+    } else {
+        format!("{failed} directories could not be watched")
+    };
+    Some(match first_error {
+        Some(err) => format!("live index updates are partial: {directories} ({err})"),
+        None => format!("live index updates are partial: {directories}"),
+    })
 }
 
 /// Directories to register, each watched non-recursively.
@@ -176,52 +279,11 @@ fn watch_targets(root: &str, max_depth: usize, skip_app_bundles: bool) -> Vec<Pa
 
 fn run(
     rx: Receiver<Message>,
-    event_tx: Sender<Message>,
-    requests: Sender<Request>,
+    mut watcher: RecommendedWatcher,
+    mut watched: HashSet<PathBuf>,
     roots: Roots,
-    targets: Vec<PathBuf>,
+    requests: Sender<Request>,
 ) {
-    let mut watcher = match RecommendedWatcher::new(
-        move |result| {
-            let _ = event_tx.send(Message::Event(result));
-        },
-        notify::Config::default(),
-    ) {
-        Ok(watcher) => watcher,
-        Err(err) => {
-            // A platform without a usable backend still ships a working app;
-            // live updates are the only thing lost, and the manual Reindex
-            // remains. Report it instead of failing silently.
-            eprintln!("zeidex: file watcher unavailable, live index updates are off: {err}");
-            return;
-        }
-    };
-
-    let mut watching = 0usize;
-    let mut failed = 0usize;
-    let mut watched: HashSet<PathBuf> = HashSet::new();
-    for target in &targets {
-        match watcher.watch(target, RecursiveMode::NonRecursive) {
-            Ok(()) => {
-                watching += 1;
-                watched.insert(target.clone());
-            }
-            Err(err) => {
-                failed += 1;
-                if failed <= 5 {
-                    eprintln!("zeidex: could not watch {}: {err}", target.display());
-                }
-            }
-        }
-    }
-    if failed > 5 {
-        eprintln!("zeidex: {failed} watch registrations failed in total");
-    }
-    if watching == 0 {
-        eprintln!("zeidex: no index root could be watched, live index updates are off");
-        return;
-    }
-
     let mut pending = Delta::default();
     let mut deadline: Option<Instant> = None;
     loop {
@@ -412,7 +474,7 @@ pub(crate) fn apply_event(
 
 #[cfg(test)]
 mod tests {
-    use super::{Delta, apply_event};
+    use super::{Delta, apply_event, registration_warning};
     use notify::event::{CreateKind, ModifyKind, RemoveKind};
     use notify::{Event, EventKind};
 
@@ -523,6 +585,31 @@ mod tests {
         );
         assert!(!changed);
         assert_eq!(delta, Delta::default());
+    }
+
+    #[test]
+    fn a_partial_watch_is_reported_with_the_failure_count() {
+        let warning = registration_warning(3, 2, Some("/root: permission denied"))
+            .expect("partial registration must warn");
+        assert!(warning.starts_with("live index updates are partial"));
+        assert!(warning.contains("2 directories could not be watched"));
+        assert!(warning.contains("/root: permission denied"));
+
+        let one = registration_warning(3, 1, None).expect("one failure must warn");
+        assert!(one.contains("1 directory could not be watched"), "{one}");
+    }
+
+    #[test]
+    fn no_watchable_root_reports_live_updates_are_off() {
+        let warning = registration_warning(0, 4, Some("/root: no such file"))
+            .expect("zero watched roots must warn");
+        assert!(warning.starts_with("live index updates are off"));
+        assert!(warning.contains("no index root could be watched"));
+    }
+
+    #[test]
+    fn a_clean_watch_has_no_warning() {
+        assert_eq!(registration_warning(12, 0, None), None);
     }
 
     #[test]

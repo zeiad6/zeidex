@@ -69,9 +69,12 @@ serialized.
 The watcher (`index_watch.rs`) registers the configured app and file roots with
 `notify`, folds events into a delta for two seconds (the first event sets the
 deadline; later ones never extend it, so a busy directory cannot starve
-updates), then hands the delta to the worker. Events that arrive during a full
-walk queue behind it and are applied when it finishes, so a delta always
-describes a state newer than the walk's snapshot. File paths become
+updates), then hands the delta to the worker. Registration happens before the
+startup walk, and a root that cannot be watched is reported in the index-status
+event — the launcher and Settings show it instead of leaving a desktop launch to
+fail silently. Events that arrive during a full walk queue behind it and are
+applied when it finishes, so a delta always describes a state newer than the
+walk's snapshot. File paths become
 `QueryEngine::refresh_paths` — targeted deletes plus single-path upserts — while
 an app-root event becomes the scoped `APPS_ONLY` walk, because a menu entry is
 parsed rather than walked and has no path to address. `Access` events are

@@ -361,9 +361,11 @@ why the OCR and export logic can be tested in CI on two operating systems.
   from Hugging Face mirrors and verifies them against `third_party/models/SHA256SUMS`.
 - **Live index updates depend on the platform watcher.** inotify, FSEvents and
   ReadDirectoryChangesW are used through `notify`; if the backend cannot start (a
-  container without inotify, an exhausted watch limit), the app says so in its log and
-  the Reindex button remains the fallback. Directories reachable only through a symlink
-  are indexed by the walk but do not receive live updates.
+  container without inotify, an exhausted watch limit), the app shows the reason in
+  the launcher and in Settings, and the Reindex button remains the fallback. A
+  partial registration is reported the same way, with the number of directories
+  that could not be watched. Directories reachable only through a symlink are
+  indexed by the walk but do not receive live updates.
 
 ## Roadmap
 

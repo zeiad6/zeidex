@@ -521,6 +521,15 @@ export default function Settings({
                   )}
                 </span>
               </div>
+              {indexStatus?.error && (
+                <div
+                  role="status"
+                  className="flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2 text-[0.7rem] leading-relaxed text-amber-200/90"
+                >
+                  <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 break-words">{indexStatus.error}</span>
+                </div>
+              )}
             </Card>
 
             <div>
