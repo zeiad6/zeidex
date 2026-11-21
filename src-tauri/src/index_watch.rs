@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -77,9 +78,16 @@ struct Roots {
 pub(crate) struct WatchStart {
     pub handle: Option<WatchHandle>,
     pub warning: Option<String>,
+    /// Identifies this watcher. A message queued by a stopped watcher must not
+    /// overwrite the warning of the one that replaced it.
+    pub generation: u64,
 }
 
+/// The next watcher's identity. Watchers are rare; a relaxed counter is enough.
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
 pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchStart {
+    let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
     let mut app_roots = config.app_scan_roots.clone();
     app_roots.sort();
     app_roots.dedup();
@@ -109,6 +117,7 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
         return WatchStart {
             handle: None,
             warning: empty_targets_warning(&app_roots, &file_roots),
+            generation,
         };
     }
 
@@ -128,6 +137,7 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
             return WatchStart {
                 handle: None,
                 warning: Some(warning),
+                generation,
             };
         }
     };
@@ -163,6 +173,7 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
         return WatchStart {
             handle: None,
             warning,
+            generation,
         };
     }
 
@@ -179,11 +190,14 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
             run(
                 rx,
                 watcher,
-                watched,
-                unwatched,
+                WatchState {
+                    watched,
+                    unwatched,
+                    last_warning: initial_warning,
+                    generation,
+                },
                 roots,
                 requests,
-                initial_warning,
             )
         });
     match join {
@@ -193,6 +207,7 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
                 join: Some(join),
             }),
             warning,
+            generation,
         },
         Err(err) => {
             let message =
@@ -205,6 +220,7 @@ pub(crate) fn start(requests: Sender<Request>, config: &RuntimeConfig) -> WatchS
             WatchStart {
                 handle: None,
                 warning,
+                generation,
             }
         }
     }
@@ -359,14 +375,21 @@ fn watch_targets(root: &str, max_depth: usize, skip_app_bundles: bool) -> Vec<Pa
     out
 }
 
+/// The watcher thread's own state: the registrations it holds, the ones that
+/// failed, the warning last sent, and the identity carried with it.
+struct WatchState {
+    watched: HashSet<PathBuf>,
+    unwatched: Unwatched,
+    last_warning: Option<String>,
+    generation: u64,
+}
+
 fn run(
     rx: Receiver<Message>,
     mut watcher: RecommendedWatcher,
-    mut watched: HashSet<PathBuf>,
-    mut unwatched: Unwatched,
+    mut state: WatchState,
     roots: Roots,
     requests: Sender<Request>,
-    mut last_warning: Option<String>,
 ) {
     let mut pending = Delta::default();
     let mut deadline: Option<Instant> = None;
@@ -383,17 +406,20 @@ fn run(
                 // disappeared releases its entries instead.
                 sync_watches(
                     &mut watcher,
-                    &mut watched,
-                    &mut unwatched,
+                    &mut state.watched,
+                    &mut state.unwatched,
                     &event.paths,
                     &roots,
                 );
                 // A registration that fails after startup must reach the UI
                 // too: the standing warning changes only when the set does.
-                let warning = unwatched.warning(watched.len());
-                if warning != last_warning {
-                    last_warning = warning.clone();
-                    let _ = requests.send(Request::WatchWarning { warning });
+                let warning = state.unwatched.warning(state.watched.len());
+                if warning != state.last_warning {
+                    state.last_warning = warning.clone();
+                    let _ = requests.send(Request::WatchWarning {
+                        generation: state.generation,
+                        warning,
+                    });
                 }
                 if apply_event(&event, &roots.apps, &roots.files, &mut pending)
                     && deadline.is_none()

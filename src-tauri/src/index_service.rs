@@ -45,8 +45,12 @@ pub(crate) enum Request {
     },
     /// The watcher's live state changed: a directory stopped being watchable
     /// or a previously failed one recovered. `None` means live updates are
-    /// complete again. Replaces the standing warning on the status event.
-    WatchWarning { warning: Option<String> },
+    /// complete again. `generation` identifies the watcher that sent it, so a
+    /// message queued by a replaced watcher cannot overwrite the new state.
+    WatchWarning {
+        generation: u64,
+        warning: Option<String>,
+    },
 }
 
 /// A clonable handle to the worker. Cloning shares the same channel and flags.
@@ -197,6 +201,7 @@ fn run_worker(
     // the worker and repeated in every status so a warning cannot be missed by
     // a frontend that subscribed after the first event.
     let mut watch_warning: Option<String> = None;
+    let mut watch_generation: u64 = 0;
     while let Ok(request) = rx.recv() {
         match request {
             Request::Full { reply } => {
@@ -219,6 +224,7 @@ fn run_worker(
                 let started = restart_watch(watch.take(), request_tx.clone(), &config);
                 watch = started.handle;
                 watch_warning = started.warning;
+                watch_generation = started.generation;
                 let db_path = db_path(&app);
                 let result = QueryEngine::bootstrap_sqlite(&db_path);
                 match result {
@@ -326,7 +332,15 @@ fn run_worker(
                     }
                 }
             }
-            Request::WatchWarning { warning } => {
+            Request::WatchWarning {
+                generation,
+                warning,
+            } => {
+                // Drop a warning queued by a watcher that has since been
+                // replaced; its state does not describe the current one.
+                if generation != watch_generation {
+                    continue;
+                }
                 // The watcher retried a directory and either failed again with
                 // a different set or recovered. Emit only on a change: this
                 // channel is shared with path deltas and must not spam.
