@@ -6,7 +6,8 @@
 
 <p align="center">
   <b>Your files. Your machine. Your data.</b><br>
-  A keyboard-first launcher and an offline document AI for Windows, macOS and Linux.
+  A keyboard-first launcher and an offline document AI for Windows and Linux —<br>
+  with macOS built from source.
 </p>
 
 <p align="center">
