@@ -3,6 +3,10 @@
 //! Skips unless `ZEIDEX_TEST_MODELS_DIR` and `ZEIDEX_TEST_ARABIC_IMAGE` are set
 //! and `ORT_DYLIB_PATH` names an ONNX Runtime shared library.
 //!
+//! The fixture (`fixtures/arabic_lines.png`) is three lines rendered with
+//! Pillow, Noto Naskh Arabic Bold at 44 px, 60 px line pitch, `direction="rtl"`,
+//! `language="ar"` on white — the same kind of clean print a scan produces.
+//!
 //! Two short lines are read exactly by `arabic_PP-OCRv4_rec`; the test pins
 //! that result so a dictionary, preprocessing or model change that breaks
 //! Arabic cannot pass unnoticed. The third line is deliberately longer than the

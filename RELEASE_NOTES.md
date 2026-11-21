@@ -132,9 +132,11 @@ Get-FileHash "Zeidex Studio_0.1.0_x64_en-US.msi" -Algorithm SHA256
 ## Known limitations
 
 - **Arabic recognition** is usable but not perfect: dense lines can lose
-  characters and Arabic-Indic digits are not read reliably yet. The next
-  recogniser candidate is
-  [PP-OCRv5 Arabic](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx).
+  characters and Arabic-Indic digits are not read reliably yet. The
+  [PP-OCRv5 Arabic](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx)
+  candidate was measured: it is notably better on clean letterforms once its
+  visual-order output is converted, but digit runs and mixed Latin text stay
+  weak, so it is not the default without a labelled corpus of real scans.
 - **No auto-update** in this release; download a newer installer when one is
   published.
 - **macOS** builds are not produced by this workflow. The shell compiles on macOS
