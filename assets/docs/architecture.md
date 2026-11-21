@@ -58,6 +58,29 @@ Tauri, Node or webview dependency.
 Searches are in-memory. SQLite is touched to load the index at startup, to
 rebuild it (`bootstrap_index`), and to record usage.
 
+## Index writes
+
+Everything that changes the index goes through one worker thread (`IndexService`
+in `src-tauri/src/index_service.rs`): the startup walk, the manual Reindex
+button, app-only refreshes after a shortcut changes, and the filesystem
+watcher. Two full walks therefore cannot race, and the SQLite writes stay
+serialized.
+
+The watcher (`index_watch.rs`) registers the configured app and file roots with
+`notify`, folds events into a delta for two seconds (the first event sets the
+deadline; later ones never extend it, so a busy directory cannot starve
+updates), then hands the delta to the worker. File paths become
+`QueryEngine::refresh_paths` — targeted deletes plus single-path upserts — while
+an app-root event becomes the scoped `APPS_ONLY` walk, because a menu entry is
+parsed rather than walked and has no path to address. `Access` events are
+ignored, and a rename is resolved by asking whether the path exists.
+
+After every change the worker reloads the in-memory engine and emits
+`zeidex://index-status` with the real count; the launcher and Settings footer
+adopt that number instead of a value sampled at mount. Saving an index-affecting
+setting starts a full walk immediately, so the warning in Settings is
+"rebuilding", not "press Reindex again".
+
 ## Shell state
 
 `AppState` holds the pieces that must survive between commands:

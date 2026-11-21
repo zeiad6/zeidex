@@ -19,6 +19,7 @@ use tauri::State;
 use zeidex_engine::config::{self, RuntimeConfig, SettingValue};
 use zeidex_storage::{SearchEngine, SearchSettings};
 
+use crate::index_service::IndexService;
 use crate::state::AppState;
 
 /// Everything the Settings Center renders, in one round trip. Ranges travel
@@ -107,14 +108,22 @@ pub fn settings_snapshot(state: State<'_, AppState>) -> Result<SettingsSnapshot,
 #[tauri::command(async)]
 pub fn settings_update(
     state: State<'_, AppState>,
+    index: State<'_, IndexService>,
     patch: SettingsPatch,
 ) -> Result<SettingsUpdate, String> {
     let resolved = zeidex_engine::config_path::current();
-    apply_patch(
+    let update = apply_patch(
         &state,
         &patch,
         resolved.as_ref().map(|path| path.path.as_path()),
-    )
+    )?;
+    // The value is saved either way; a changed root or depth cannot be applied
+    // by rewriting rows, so the shell rebuilds the index now instead of asking
+    // the user to press a second button. The event carries the new count.
+    if update.reindex_required {
+        index.index_settings_changed();
+    }
+    Ok(update)
 }
 
 /// The apply path, free of Tauri state so it can be tested against a temporary

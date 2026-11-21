@@ -184,7 +184,10 @@ fn is_windows_reserved_name(name: &str) -> bool {
         .any(|reserved| reserved == &stem)
 }
 
-pub(crate) fn path_is_same_or_child(path: &str, parent: &str) -> bool {
+/// Boundary-aware containment: `path` is `parent` or lives under it. Public so
+/// the watcher can decide which configured root an event belongs to without a
+/// second separator/case implementation.
+pub fn path_is_same_or_child(path: &str, parent: &str) -> bool {
     PathPolicy::current().is_same_or_child(path, parent)
 }
 

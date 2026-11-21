@@ -519,17 +519,15 @@ impl SqliteStore {
         let tx = self.write_tx()?;
         {
             let mut stmt = tx.prepare(
-                // Interim write-reduction (see specs/indexing-scale.md): the `WHERE`
-                // skips the UPDATE entirely when nothing the scan controls changed,
-                // so a reindex after one download/install rewrites ~1 row instead of
-                // all ~8000. Pairs with `delete_unseen_candidates` for pruning - we
-                // can no longer rely on bumping `indexed_at` for every seen row.
+                // Write reduction: the `WHERE` skips the UPDATE entirely when
+                // nothing the scan controls changed, so a reindex after one
+                // download/install rewrites ~1 row instead of all ~8000, and
+                // the watcher's single-path upserts cost one row each. Pairs
+                // with `delete_unseen_candidates` for pruning - we can no
+                // longer rely on bumping `indexed_at` for every seen row.
                 // List EVERY scan-owned column here; a missing one means stale data
                 // silently lingers. (use_count/last_used_at are intentionally never
                 // overwritten on conflict, so they're not part of change detection.)
-                // TODO(indexing-scale Direction A): the full walk + per-reindex
-                // re-normalize are still O(total). Move to event-driven incremental
-                // indexing (watcher paths) to make reindex cost ∝ changed files.
                 "INSERT INTO candidates (id, kind, title, subtitle, path, use_count, last_used_at_unix_s, indexed_at_unix_s, fs_modified_at_unix_s, icon)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(id) DO UPDATE SET
@@ -1054,6 +1052,52 @@ impl SqliteStore {
         let removed = tx.execute(
             &format!("DELETE FROM candidates WHERE {where_unseen}"),
             bindings.as_slice(),
+        )?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
+    /// Every `(id, path)` pair in the candidate table.
+    ///
+    /// The watcher needs this to turn a removed filesystem path into candidate
+    /// ids. Path containment is decided in Rust (`path_is_same_or_child`)
+    /// instead of SQL, so the one tested implementation of separator, trailing
+    /// slash and Windows case rules decides what "under this folder" means; a
+    /// `LIKE` clause would be a second, subtly different one.
+    pub fn candidate_paths(&self) -> StorageResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT id, path FROM candidates")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Deletes candidates by id, and their usage history with them.
+    ///
+    /// One transaction: the `usage_events.candidate_id` foreign key would make
+    /// the candidate delete fail if a usage row survived it. Used by the
+    /// incremental watcher refresh, where the exact ids are already known and a
+    /// full `seen` set is not needed.
+    pub fn delete_candidates_by_ids(&mut self, ids: &[String]) -> StorageResult<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.write_tx()?;
+        tx.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS _dead_ids (id TEXT PRIMARY KEY);
+             DELETE FROM _dead_ids;",
+        )?;
+        {
+            let mut stmt = tx.prepare("INSERT OR IGNORE INTO _dead_ids (id) VALUES (?1)")?;
+            for id in ids {
+                stmt.execute(params![id])?;
+            }
+        }
+        tx.execute(
+            "DELETE FROM usage_events WHERE candidate_id IN (SELECT id FROM _dead_ids)",
+            [],
+        )?;
+        let removed = tx.execute(
+            "DELETE FROM candidates WHERE id IN (SELECT id FROM _dead_ids)",
+            [],
         )?;
         tx.commit()?;
         Ok(removed)
@@ -2266,6 +2310,78 @@ mod tests {
         assert!(
             !ids.contains(&"app:x".to_string()),
             "in-scope unseen removed"
+        );
+    }
+
+    #[test]
+    fn delete_candidates_by_ids_removes_usage_rows_first() {
+        let mut store = SqliteStore::open_in_memory().expect("open sqlite in memory");
+        store
+            .upsert_candidates_indexed(
+                &[
+                    candidate("file:gone", "gone", "/x/gone"),
+                    candidate("file:kept", "kept", "/x/kept"),
+                ],
+                Some(100),
+            )
+            .expect("insert");
+        store
+            .record_usage_event("file:gone", "open")
+            .expect("record usage");
+
+        let removed = store
+            .delete_candidates_by_ids(&["file:gone".to_string()])
+            .expect("delete by id");
+        assert_eq!(removed, 1);
+
+        let ids: Vec<String> = store
+            .load_candidates(None)
+            .expect("load")
+            .iter()
+            .map(|c| c.id.to_string())
+            .collect();
+        assert_eq!(ids, vec!["file:kept".to_string()]);
+        // The foreign key would have refused the candidate delete if the usage
+        // row had survived, so reaching here already proves order; assert the
+        // row is gone explicitly instead of trusting that.
+        let usage: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM usage_events", [], |row| row.get(0))
+            .expect("count usage");
+        assert_eq!(usage, 0);
+    }
+
+    #[test]
+    fn delete_candidates_by_ids_is_a_noop_for_an_empty_list() {
+        let mut store = SqliteStore::open_in_memory().expect("open sqlite in memory");
+        store
+            .upsert_candidates_indexed(&[candidate("file:a", "a", "/x/a")], Some(100))
+            .expect("insert");
+        assert_eq!(store.delete_candidates_by_ids(&[]).expect("noop"), 0);
+        assert_eq!(store.load_candidates(None).expect("load").len(), 1);
+    }
+
+    #[test]
+    fn candidate_paths_exposes_the_id_and_path_pairs() {
+        let mut store = SqliteStore::open_in_memory().expect("open sqlite in memory");
+        store
+            .upsert_candidates_indexed(
+                &[
+                    candidate("file:a", "a", "/x/a.txt"),
+                    candidate("folder:b", "b", "/x/b"),
+                ],
+                Some(100),
+            )
+            .expect("insert");
+
+        let mut pairs = store.candidate_paths().expect("candidate paths");
+        pairs.sort();
+        assert_eq!(
+            pairs,
+            vec![
+                ("file:a".to_string(), "/x/a.txt".to_string()),
+                ("folder:b".to_string(), "/x/b".to_string()),
+            ]
         );
     }
 

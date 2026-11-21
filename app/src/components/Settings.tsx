@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, type AppSettings, type ModelsStatus } from "../api";
+import type { IndexStatus } from "../index-status";
 import {
   diff,
   toDraft,
@@ -145,10 +146,12 @@ function Card({ children }: { children: React.ReactNode }) {
 
 export default function Settings({
   rtl,
+  indexStatus,
   onSetRtl,
   onBack,
 }: {
   rtl: boolean;
+  indexStatus: IndexStatus | null;
   onSetRtl: (next: boolean) => void;
   onBack: () => void;
 }) {
@@ -160,6 +163,18 @@ export default function Settings({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [indexing, setIndexing] = useState(false);
+  // The worker is the source of truth for the count; a watcher refresh or a
+  // settings-triggered rebuild updates this panel without a reload. The ref is
+  // what stops a slower `settingsSnapshot` from writing an older count over a
+  // status that arrived while it was in flight.
+  const latestIndex = useRef<IndexStatus | null>(null);
+  useEffect(() => {
+    if (!indexStatus) return;
+    latestIndex.current = indexStatus;
+    setSettings((current) =>
+      current ? { ...current, candidateCount: indexStatus.count } : current,
+    );
+  }, [indexStatus]);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [models, setModels] = useState<ModelsStatus | null>(null);
@@ -170,7 +185,8 @@ export default function Settings({
       .settingsSnapshot()
       .then((snapshot) => {
         if (!active) return;
-        setSettings(snapshot);
+        const latest = latestIndex.current;
+        setSettings(latest ? { ...snapshot, candidateCount: latest.count } : snapshot);
         setDraft(toDraft(snapshot));
       })
       .catch((err) => {
@@ -253,8 +269,8 @@ export default function Settings({
         setNotice({
           kind: "warning",
           message: t(
-            "Saved. Reindex to apply the new index settings.",
-            "حُفظت. أعد الفهرسة لتطبيق إعدادات الفهرس الجديدة.",
+            "Saved. Rebuilding the index with the new settings.",
+            "حُفظت. تُعاد فهرسة الفهرس بالإعدادات الجديدة.",
           ),
         });
       } else {
@@ -486,15 +502,15 @@ export default function Settings({
                 <button
                   type="button"
                   onClick={() => void reindex()}
-                  disabled={indexing}
+                  disabled={indexing || (indexStatus?.indexing ?? false)}
                   className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-accent-400 to-iris-400 px-3.5 py-1.5 text-xs font-semibold text-ink-950 shadow-[0_8px_24px_-10px_rgb(34_211_238/0.8)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <Icon
                     name="refresh"
                     size={13}
-                    className={indexing ? "animate-spin" : ""}
+                    className={indexing || (indexStatus?.indexing ?? false) ? "animate-spin" : ""}
                   />
-                  {indexing
+                  {indexing || (indexStatus?.indexing ?? false)
                     ? t("Reindexing…", "يفهرس…")
                     : t("Reindex now", "إعادة الفهرسة الآن")}
                 </button>

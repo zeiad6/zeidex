@@ -4,6 +4,8 @@ mod apps;
 mod files;
 mod settings;
 
+pub(crate) use files::{candidate_for_path, compile_ignored_matchers, walk_children};
+
 use std::collections::HashSet;
 use std::sync::mpsc;
 use std::thread;

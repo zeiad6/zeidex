@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { parseIndexStatus, type IndexStatus } from "./index-status";
 
 export type LaunchResultAction =
   | { type: "open"; path: string }
@@ -206,6 +207,11 @@ export const api = {
     invoke<void>("export_xlsx_pages", { pages, path }),
   onOcrProgress: (callback: (event: PipelineProgress) => void) =>
     listen<PipelineProgress>("ocr-progress", (event) => callback(event.payload)),
+  onIndexStatus: (callback: (status: IndexStatus) => void): Promise<() => void> =>
+    listen<unknown>("zeidex://index-status", (event) => {
+      const status = parseIndexStatus(event.payload);
+      if (status) callback(status);
+    }),
   onMode: async (callback: (mode: string) => void): Promise<() => void> =>
     listen<string>("zeidex-mode", (event) => callback(event.payload)),
 };

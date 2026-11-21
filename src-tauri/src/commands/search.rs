@@ -4,6 +4,7 @@ use tauri::State;
 use zeidex_engine::{LaunchResult, LaunchResultAction};
 use zeidex_storage::SearchSettings;
 
+use crate::index_service::IndexService;
 use crate::state::AppState;
 
 /// Launcher search. `limit` is optional so the UI can omit it for the default.
@@ -79,23 +80,15 @@ fn web_search_result(query: &str, settings: SearchSettings) -> Option<LaunchResu
     })
 }
 
-/// Walks apps/files/settings and rebuilds the candidate table. Runs on the
-/// blocking pool so the UI thread never stalls on the filesystem walk.
+/// Walks apps/files/settings and rebuilds the candidate table. The work runs on
+/// the single index worker, so it cannot race the filesystem watcher; this
+/// blocking-pool thread only waits for the result and reports it.
 #[tauri::command]
-pub async fn bootstrap_index(state: State<'_, AppState>) -> Result<usize, String> {
-    let db_path = state.db_path.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        zeidex_engine::QueryEngine::bootstrap_sqlite(&db_path).map_err(|err| err.to_string())
-    })
-    .await
-    .map_err(|err| err.to_string())??;
-
-    state.reload_engine();
-    let engine = state
-        .engine
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Ok(engine.candidate_count())
+pub async fn bootstrap_index(service: State<'_, IndexService>) -> Result<usize, String> {
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.full_index_blocking())
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 #[tauri::command(async)]

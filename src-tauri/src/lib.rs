@@ -2,6 +2,8 @@
 
 pub mod commands;
 pub mod error;
+mod index_service;
+mod index_watch;
 pub mod state;
 
 use anyhow::anyhow;
@@ -10,6 +12,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+use crate::index_service::IndexService;
 use crate::state::AppState;
 
 pub fn run() -> anyhow::Result<()> {
@@ -28,6 +31,12 @@ pub fn run() -> anyhow::Result<()> {
             let models_dir = state::resolve_models_dir(app.handle());
             let pdfium_library = state::resolve_pdfium_library(app.handle());
             app.manage(AppState::new(db_path, models_dir, pdfium_library)?);
+            // Every index write goes through this worker: the startup walk,
+            // the filesystem watcher, and the Reindex button. Managing it here,
+            // before any command can run, means no caller ever sees a missing
+            // state.
+            let index_service = IndexService::start(app.handle().clone());
+            app.manage(index_service.clone());
 
             // Clipboard capture must not depend on the webview being visible;
             // see `run_monitor`. Failing to start it costs history, not the
@@ -69,6 +78,10 @@ pub fn run() -> anyhow::Result<()> {
             if first_run || !hotkey_registered || !tray_ready {
                 show_main(app.handle());
             }
+            // Eager mode starts the walk now; lazy mode waits for the first
+            // show, which has just happened if either reachability fallback
+            // fired or this is a fresh install.
+            index_service.start_initial_index();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -133,6 +146,11 @@ fn show_main(handle: &AppHandle) {
     };
     let _ = window.show();
     let _ = window.set_focus();
+    // Lazy indexing walks on first use; "use" is the window becoming visible,
+    // not a timer. This is the one choke point every route goes through.
+    if let Some(service) = handle.try_state::<IndexService>() {
+        service.on_window_shown();
+    }
 }
 
 fn toggle_window(handle: &AppHandle) {

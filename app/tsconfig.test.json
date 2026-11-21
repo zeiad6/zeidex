@@ -16,6 +16,8 @@
     "types": ["node"]
   },
   "files": [
+    "src/index-status.ts",
+    "src/index-status.test.ts",
     "src/settings-draft.ts",
     "src/settings-draft.test.ts",
     "src/window-size.ts",

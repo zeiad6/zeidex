@@ -14,6 +14,7 @@ pub mod url_history;
 pub use action::{ActionKind, LaunchAction};
 use config::RuntimeConfig;
 use normalize::normalize_for_search;
+pub use platform::paths::path_is_same_or_child;
 pub use result::{LaunchResult, LaunchResultAction};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -299,9 +300,10 @@ impl QueryEngine {
         // reliably means "gone". delete_unseen_candidates keeps the indexed_at<run
         // guard to preserve i64::MAX pinned rows. `seen` is already collected above
         // for dedup, so this reuses it.
-        // TODO(indexing-scale Direction A): this still required a full walk to
-        // build `seen`. Event-driven incremental indexing (watcher paths) would
-        // delete only the paths the watcher reported removed.
+        // This branch is the whole-index path and still needs `seen`. The
+        // watcher does not come through here: it calls `refresh_paths`, which
+        // deletes exactly the ids under the reported paths and never walks the
+        // tree to decide what is gone.
         let prefixes = scope.id_prefixes();
         if scope.is_all() {
             if discovered_count > 0 {
@@ -316,6 +318,132 @@ impl QueryEngine {
         let _ = store.prune_usage_events_to_max(MAX_USAGE_EVENT_ROWS)?;
 
         Ok(())
+    }
+
+    /// Applies a filesystem delta without walking every root.
+    ///
+    /// This is the event-driven counterpart to `bootstrap_sqlite_scoped`: the
+    /// watcher already knows which paths changed, so the work is proportional
+    /// to the delta instead of the whole index. `removed` paths are matched
+    /// with the same boundary-aware containment the id scheme uses, so deleting
+    /// a folder also removes the rows for its children. `added` paths go
+    /// through the full walk's candidate builder, so filters and ids cannot
+    /// drift between the walk and the watcher.
+    pub fn refresh_paths(
+        db_path: impl AsRef<Path>,
+        config: &RuntimeConfig,
+        removed: &[std::path::PathBuf],
+        added: &[std::path::PathBuf],
+    ) -> Result<RefreshOutcome, StorageError> {
+        let mut store = SqliteStore::open(db_path)?;
+        Self::refresh_paths_in(&mut store, config, removed, added)
+    }
+
+    fn refresh_paths_in(
+        store: &mut SqliteStore,
+        config: &RuntimeConfig,
+        removed: &[std::path::PathBuf],
+        added: &[std::path::PathBuf],
+    ) -> Result<RefreshOutcome, StorageError> {
+        let removed_text: Vec<String> = removed
+            .iter()
+            .filter_map(|path| path.to_str().map(str::to_string))
+            .collect();
+        let ids: Vec<String> = if removed_text.is_empty() {
+            Vec::new()
+        } else {
+            store
+                .candidate_paths()?
+                .into_iter()
+                .filter(|(_, path)| {
+                    removed_text
+                        .iter()
+                        .any(|parent| path_is_same_or_child(path, parent))
+                })
+                .map(|(id, _)| id)
+                .collect()
+        };
+        let removed_count = store.delete_candidates_by_ids(&ids)?;
+
+        // Same roots, same order as `discover_local_files_and_folders`, so an
+        // overlapping root cannot make the watcher index a path the walk drops.
+        let mut roots = config.file_scan_roots.clone();
+        roots.extend(config.file_scan_extra_roots.iter().cloned());
+        roots.sort();
+        roots.dedup();
+        let matchers = index::compile_ignored_matchers(&config.ignored_file_patterns);
+
+        let mut candidates: Vec<Candidate> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        for path in added {
+            // A create event can fire before the writer has flushed, and a
+            // rename can report a path that is already gone. Re-checking here
+            // keeps a stale event from inserting a row for a missing file.
+            if !path.exists() {
+                continue;
+            }
+            let Some(path_str) = path.to_str() else {
+                continue;
+            };
+            // Nested roots are legal. The shallowest one decides the depth, or
+            // a path could be in-margin under one root and out-of-margin under
+            // another and flip with root order.
+            let containing = roots
+                .iter()
+                .filter_map(|root| {
+                    if !path_is_same_or_child(path_str, root) {
+                        return None;
+                    }
+                    let depth = Path::new(path_str)
+                        .strip_prefix(root)
+                        .ok()
+                        .map(|tail| tail.components().count())?;
+                    (depth > 0 && depth <= config.file_scan_depth).then_some((root, depth))
+                })
+                .min_by_key(|(_, depth)| *depth);
+            let Some((root, depth)) = containing else {
+                continue;
+            };
+            if let Some(candidate) = index::candidate_for_path(config, root, path, &matchers)
+                && seen.insert(candidate.id.to_string())
+            {
+                candidates.push(candidate);
+            }
+            // A folder moved in with its contents produces no create event for
+            // each child, so the subtree is walked once, bounded by the depth
+            // the full walk would have used.
+            if depth < config.file_scan_depth && path.is_dir() {
+                let mut children = Vec::new();
+                index::walk_children(
+                    path_str,
+                    config,
+                    &matchers,
+                    config.file_scan_depth - depth,
+                    &mut children,
+                );
+                for child in children {
+                    if seen.insert(child.id.to_string()) {
+                        candidates.push(child);
+                    }
+                }
+            }
+        }
+
+        let added_count = candidates.len();
+        if !candidates.is_empty() {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|err| StorageError::Data(format!("system time error: {err}")))?
+                .as_secs() as i64;
+            for chunk in candidates.chunks(INDEX_UPSERT_CHUNK_SIZE) {
+                store.upsert_candidates_indexed(chunk, Some(now))?;
+            }
+        }
+
+        Ok(RefreshOutcome {
+            removed: removed_count,
+            added: added_count,
+        })
     }
 
     pub fn build_web_search_url(query: &str, settings: SearchSettings) -> Option<String> {
@@ -348,6 +476,15 @@ impl IndexedCandidate {
             path_search,
         }
     }
+}
+
+/// What one incremental refresh changed. `added` counts candidates the delta
+/// produced (the change-detecting upsert may have skipped the write for an
+/// unchanged row, but the row is still correct); `removed` counts deleted rows.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RefreshOutcome {
+    pub removed: usize,
+    pub added: usize,
 }
 
 /// Selects which discovery sources `bootstrap_sqlite_scoped` should re-walk.

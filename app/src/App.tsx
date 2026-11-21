@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
+import type { IndexStatus } from "./index-status";
 import Launcher from "./components/Launcher";
 import OcrStudio from "./components/OcrStudio";
 import Settings from "./components/Settings";
@@ -39,6 +40,7 @@ function storedDirection(): boolean {
 export default function App() {
   const [mode, setMode] = useState<Mode>("launcher");
   const [rtl, setRtl] = useState(storedDirection);
+  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
 
   const setDirection = useCallback((next: boolean) => {
     setRtl(next);
@@ -55,6 +57,26 @@ export default function App() {
     api
       .onMode((next) => {
         if (active) setMode(next === "ocr" ? "ocr" : "launcher");
+      })
+      .then((fn) => {
+        if (active) unlisten = fn;
+        else fn();
+      });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
+  // The index worker is the only source of the count. Both screens adopt what
+  // it reports, so a watcher refresh or a settings-triggered rebuild updates
+  // the footer without a second request and without a guessed number.
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    api
+      .onIndexStatus((status) => {
+        if (active) setIndexStatus(status);
       })
       .then((fn) => {
         if (active) unlisten = fn;
@@ -90,12 +112,14 @@ export default function App() {
       ) : mode === "settings" ? (
         <Settings
           rtl={rtl}
+          indexStatus={indexStatus}
           onSetRtl={setDirection}
           onBack={() => setMode("launcher")}
         />
       ) : (
         <Launcher
           rtl={rtl}
+          indexStatus={indexStatus}
           onToggleRtl={() => setDirection(!rtl)}
           onOpenOcr={() => setMode("ocr")}
           onOpenSettings={() => setMode("settings")}

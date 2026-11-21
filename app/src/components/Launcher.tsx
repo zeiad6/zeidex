@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, type Calculation, type ClipEntry, type LaunchResult, type Tab } from "../api";
+import type { IndexStatus } from "../index-status";
 import { count as countLabel } from "../i18n";
 import { Wordmark } from "./Brand";
 import ClipboardPanel from "./ClipboardPanel";
@@ -78,11 +79,13 @@ function usageAction(result: LaunchResult): string {
 
 export default function Launcher({
   rtl,
+  indexStatus,
   onToggleRtl,
   onOpenOcr,
   onOpenSettings,
 }: {
   rtl: boolean;
+  indexStatus: IndexStatus | null;
   onToggleRtl: () => void;
   onOpenOcr: () => void;
   onOpenSettings: () => void;
@@ -97,6 +100,7 @@ export default function Launcher({
   const [clipboardPaused, setClipboardPaused] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [count, setCount] = useState<number | null>(null);
+  const statusSeen = useRef(false);
   const [calc, setCalc] = useState<Calculation | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Ticket for clipboard list reads: a response that started before a delete, a
@@ -198,9 +202,21 @@ export default function Launcher({
   useEffect(() => {
     api
       .candidateCount()
-      .then(setCount)
+      .then((value) => {
+        // A status event that landed while this request was in flight is
+        // newer than the snapshot the request returned; do not overwrite it.
+        if (!statusSeen.current) setCount(value);
+      })
       .catch(() => undefined);
   }, []);
+
+  // The worker emits the count after every walk and every watched change; the
+  // footer shows that number rather than the one sampled at mount.
+  useEffect(() => {
+    if (!indexStatus) return;
+    statusSeen.current = true;
+    setCount(indexStatus.count);
+  }, [indexStatus]);
 
   const visible = results.filter((result) => {
     if (tab === "apps") return result.kind === "app";
@@ -322,6 +338,9 @@ export default function Launcher({
   };
 
   const idle = query.trim().length === 0;
+  // The button's own request and the worker's status are both "busy"; showing
+  // only the local flag would let a startup walk look idle.
+  const busy = indexing || (indexStatus?.indexing ?? false);
 
   return (
     <div className="flex h-full items-start justify-center bg-transparent px-4 pt-[10vh]">
@@ -518,10 +537,14 @@ export default function Launcher({
                     ? countLabel("clips", clipboard.length, rtl)
                     : countLabel("results", visible.length, rtl)}
           </span>
-          {count !== null && (
-            <span className="text-zinc-600">
-              {rtl ? `${count} مفهرس` : `${count.toLocaleString()} indexed`}
-            </span>
+          {busy ? (
+            <span className="text-zinc-600">{rtl ? "يفهرس…" : "Indexing…"}</span>
+          ) : (
+            count !== null && (
+              <span className="text-zinc-600">
+                {rtl ? `${count} مفهرس` : `${count.toLocaleString()} indexed`}
+              </span>
+            )
           )}
 
           <span className="ms-auto flex items-center gap-2">
@@ -540,11 +563,11 @@ export default function Launcher({
             <button
               type="button"
               onClick={reindex}
-              disabled={indexing}
+              disabled={busy}
               className="flex items-center gap-1.5 rounded-full px-2 py-1 text-zinc-400 transition hover:bg-white/10 hover:text-zinc-200 disabled:opacity-50"
             >
-              <Icon name="refresh" size={12} className={indexing ? "animate-spin" : ""} />
-              {indexing ? (rtl ? "يفهرس…" : "Indexing…") : rtl ? "إعادة الفهرسة" : "Reindex"}
+              <Icon name="refresh" size={12} className={busy ? "animate-spin" : ""} />
+              {busy ? (rtl ? "يفهرس…" : "Indexing…") : rtl ? "إعادة الفهرسة" : "Reindex"}
             </button>
           </span>
         </footer>

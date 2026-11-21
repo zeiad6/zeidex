@@ -22,7 +22,8 @@ The workspace builds and tests on its own — no Tauri, Node or webview needed.
 - `platform/`: per-OS discovery and settings catalogs (`macos`, `linux`, `windows`).
 - `query.rs`, `search.rs`, `scoring.rs`: parse a query, score candidates, keep the top-K in a heap, then re-rank a bounded pool.
 - `action.rs`, `result.rs`: what a result is and what can be done with it.
-- `bootstrap`: the SQLite walk that rebuilds the candidate table, whole or scoped.
+- `bootstrap`: the SQLite walk that rebuilds the candidate table, whole (`BootstrapScope::ALL`) or scoped (`APPS_ONLY`, `FILES_ONLY`, …).
+- `refresh_paths`: the incremental counterpart. The filesystem watcher passes the paths that were added or removed; removals are matched with the same boundary-aware containment the id scheme uses (so a folder delete takes its children and never a sibling whose name shares a prefix), and additions go through `candidate_for_path`, the same builder the walk uses. Cost is proportional to the delta, not the index.
 
 ## Search pipeline
 
