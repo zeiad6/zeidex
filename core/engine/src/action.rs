@@ -1,6 +1,6 @@
-use lumio_indexing::UsageAction;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use zeidex_indexing::UsageAction;
 
 const ACTION_OPEN_APP: &str = UsageAction::OPEN_APP;
 const ACTION_OPEN_FILE: &str = UsageAction::OPEN_FILE;

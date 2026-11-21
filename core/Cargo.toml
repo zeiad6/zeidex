@@ -1,9 +1,12 @@
 [workspace]
 members = [
   "answers",
+  "calc",
   "engine",
+  "exporter",
   "indexing",
   "matching",
+  "ocr_engine",
   "ranking",
   "storage",
   "tools",

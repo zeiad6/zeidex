@@ -1,5 +1,5 @@
 [package]
-name = "lumio-engine"
+name = "zeidex-engine"
 edition = "2024"
 rust-version.workspace = true
 license.workspace = true
@@ -7,11 +7,11 @@ authors.workspace = true
 version = "0.1.0"
 
 [dependencies]
-lumio-indexing = { path = "../indexing" }
-lumio-matching = { path = "../matching" }
-lumio-ranking = { path = "../ranking" }
-lumio-storage = { path = "../storage" }
-lumio-tools = { path = "../tools" }
+zeidex-indexing = { path = "../indexing" }
+zeidex-matching = { path = "../matching" }
+zeidex-ranking = { path = "../ranking" }
+zeidex-storage = { path = "../storage" }
+zeidex-tools = { path = "../tools" }
 ignore = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -20,8 +20,9 @@ unicode-normalization = "0.1"
 globset = "0.4.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSLocale", "NSString"] }
+# Bundle metadata is parsed from Info.plist / InfoPlist.strings with `plist`,
+# so no Objective-C runtime linkage is needed and the module builds anywhere.
+plist = "1.10"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [

@@ -7,14 +7,14 @@
 //!   • `files`   — an ordinary tree (50 dirs × 200 files) where the file limit
 //!     is what stops the walk. Guards against a regression on the common case.
 //!
-//! Each run bootstraps into a fresh throwaway DB via `LUMIO_DB_PATH` /
-//! `LUMIO_CONFIG_PATH`, so the live index is never touched. Reports the median
+//! Each run bootstraps into a fresh throwaway DB via `ZEIDEX_DB_PATH` /
+//! `ZEIDEX_CONFIG_PATH`, so the live index is never touched. Reports the median
 //! wall time, the candidate count, and the WAL size left on disk.
 //!
 //! Run with (peak RSS comes from `time -l`):
 //!   cargo build --release --bin index_scan_bench --manifest-path tools/perf/Cargo.toml
 //!   /usr/bin/time -l tools/perf/target/release/index_scan_bench folders
-use lumio_engine::QueryEngine;
+use zeidex_engine::QueryEngine;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -25,10 +25,10 @@ const FILE_SCAN_LIMIT: usize = 5_000;
 
 fn main() {
     let shape = env::args().nth(1).unwrap_or_else(|| "folders".into());
-    let tempdir = env::temp_dir().join(format!("lumio-index-scan-{shape}-{}", std::process::id()));
+    let tempdir = env::temp_dir().join(format!("zeidex-index-scan-{shape}-{}", std::process::id()));
     let apps_root = tempdir.join("apps");
     let files_root = tempdir.join("files");
-    let config_path = tempdir.join("lumio.config");
+    let config_path = tempdir.join("zeidex.config");
     fs::create_dir_all(&apps_root).expect("mkdir apps");
     fs::create_dir_all(&files_root).expect("mkdir files");
 
@@ -38,21 +38,21 @@ fn main() {
         other => panic!("unknown shape {other:?}; use `folders` or `files`"),
     };
     write_config(&config_path, &apps_root, &files_root);
-    unsafe { env::set_var("LUMIO_CONFIG_PATH", &config_path) };
+    unsafe { env::set_var("ZEIDEX_CONFIG_PATH", &config_path) };
 
     let mut times_ms = Vec::with_capacity(RUNS);
     let mut candidates = 0;
     let mut wal_bytes = 0;
     for run in 0..RUNS {
         let db_path = tempdir.join(format!("run{run}.db"));
-        unsafe { env::set_var("LUMIO_DB_PATH", &db_path) };
+        unsafe { env::set_var("ZEIDEX_DB_PATH", &db_path) };
         let started = Instant::now();
         QueryEngine::bootstrap_sqlite(&db_path).expect("bootstrap");
         times_ms.push(started.elapsed().as_secs_f64() * 1000.0);
         wal_bytes = fs::metadata(db_path.with_extension("db-wal"))
             .map(|m| m.len())
             .unwrap_or(0);
-        candidates = lumio_storage::SqliteStore::open(&db_path)
+        candidates = zeidex_storage::SqliteStore::open(&db_path)
             .and_then(|s| s.load_candidates(None))
             .map(|v| v.len())
             .unwrap_or(0);

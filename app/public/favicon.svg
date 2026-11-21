@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Zeidex Studio">
+  <title>Zeidex Studio</title>
+  <defs>
+    <linearGradient id="rim" x1="18" y1="14" x2="238" y2="244" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a5f3fc"/>
+      <stop offset="0.55" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="72" fill="#0b111c" fill-opacity="0.9"/>
+  <rect x="12" y="12" width="232" height="232" rx="72" fill="none" stroke="url(#rim)" stroke-opacity="0.55" stroke-width="4"/>
+  <path d="M82 80h92l-80 96h88" fill="none" stroke="url(#rim)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="196" cy="62" r="14" fill="#67e8f9"/>
+</svg>

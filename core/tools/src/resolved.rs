@@ -174,23 +174,23 @@ mod tests {
     fn an_application_launch_carries_its_path_instead() {
         let value = json(Ok(Launch::Application {
             tool: "zed".into(),
-            path: "/tmp/lumio".into(),
+            path: "/tmp/zeidex".into(),
         }));
 
         assert_eq!(value["kind"], KIND_APPLICATION);
         assert_eq!(value["tool"], "zed");
-        assert_eq!(value["path"], "/tmp/lumio");
+        assert_eq!(value["path"], "/tmp/zeidex");
         assert!(value["command"].is_null());
     }
 
     #[test]
     fn a_system_default_carries_only_the_path() {
         let value = json(Ok(Launch::SystemDefault {
-            path: "/tmp/lumio".into(),
+            path: "/tmp/zeidex".into(),
         }));
 
         assert_eq!(value["kind"], KIND_SYSTEM_DEFAULT);
-        assert_eq!(value["path"], "/tmp/lumio");
+        assert_eq!(value["path"], "/tmp/zeidex");
         assert!(value["tool"].is_null());
     }
 
@@ -248,8 +248,8 @@ mod tests {
         tools.set(key::TEXT_EDITOR, "zed");
         tools.set(key::CODE_EDITOR, "cursor");
 
-        let file = Resolved::from(resolve("edit", "/tmp/lumio", false, &tools).unwrap());
-        let folder = Resolved::from(resolve("edit", "/tmp/lumio", true, &tools).unwrap());
+        let file = Resolved::from(resolve("edit", "/tmp/zeidex", false, &tools).unwrap());
+        let folder = Resolved::from(resolve("edit", "/tmp/zeidex", true, &tools).unwrap());
 
         assert_eq!(file.tool.as_deref(), Some("zed"));
         assert_eq!(folder.tool.as_deref(), Some("cursor"));

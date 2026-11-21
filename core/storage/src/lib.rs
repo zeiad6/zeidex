@@ -1,9 +1,9 @@
-use lumio_indexing::{Candidate, CandidateKind};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use zeidex_indexing::{Candidate, CandidateKind};
 
 const SEARCH_ENGINE_DUCKDUCKGO: &str = "duckduckgo";
 const SEARCH_ENGINE_GOOGLE: &str = "google";
@@ -596,7 +596,16 @@ impl SqliteStore {
                  content, content_hash, kind, app_bundle_id, copied_at_unix_s,
                  first_copied_at_unix_s, copy_count, pinned)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![content, hash, kind, app, now, first_copied, copy_count, pinned],
+            params![
+                content,
+                hash,
+                kind,
+                app,
+                now,
+                first_copied,
+                copy_count,
+                pinned
+            ],
         )?;
         let row_id = tx.last_insert_rowid();
         let cap = if kind == CLIPBOARD_KIND_IMAGE {
@@ -996,7 +1005,12 @@ impl SqliteStore {
 
         // Clip details shown in the clipboard preview. Additive on existing DBs:
         // old rows have no first copy time (read as their last) and count as one copy.
-        ensure_column_exists(&self.conn, "clipboard_entries", "first_copied_at_unix_s", "INTEGER")?;
+        ensure_column_exists(
+            &self.conn,
+            "clipboard_entries",
+            "first_copied_at_unix_s",
+            "INTEGER",
+        )?;
         ensure_column_exists(
             &self.conn,
             "clipboard_entries",
@@ -1886,7 +1900,7 @@ mod tests {
         /// Long enough to be blocked when released, far under the 5s timeout.
         const HOLD: std::time::Duration = std::time::Duration::from_millis(200);
 
-        let dir = std::env::temp_dir().join(format!("lumio-store-busy-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zeidex-store-busy-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join("contended.db");
         let _ = std::fs::remove_file(&path);

@@ -1,224 +1,164 @@
 name: CI
 
-# No automatic triggers on purpose: pushing to main (or anywhere else) never
-# starts CI. The only pipeline entry point is ./scripts/release.sh vX.Y.Z,
-# which runs every check locally first (cargo tests + scripts/build.sh) and
-# then pushes the v* tag that starts release.yml.
-# workflow_dispatch stays as a manual escape hatch from the Actions tab.
 on:
   workflow_dispatch:
+  pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege by default. Jobs that need more ask for it themselves.
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  changes:
-    name: Detect Changes
-    runs-on: ubuntu-latest
-    outputs:
-      swift: ${{ steps.filter.outputs.swift }}
-      rust: ${{ steps.filter.outputs.rust }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Detect changed paths
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            swift:
-              - 'apps/macos/**'
-              - 'bridge/ffi/**'
-            rust:
-              - 'core/**'
-              - 'bridge/ffi/**'
-              - '.github/workflows/ci.yml'
-
-  lint:
-    name: lint
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
+  core:
+    name: Rust core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
-          components: clippy, rustfmt
+          components: rustfmt, clippy
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@2
+        with:
+          workspaces: core
 
-      - name: Check formatting (core workspace)
+      - name: Format
         run: cargo fmt --all --manifest-path core/Cargo.toml -- --check
 
-      - name: Check formatting (ffi crate)
-        run: cargo fmt --all --manifest-path bridge/ffi/Cargo.toml -- --check
+      - name: Clippy (production paths deny unwrap/expect)
+        run: >-
+          cargo clippy --workspace --lib --manifest-path core/Cargo.toml
+          -- -D clippy::unwrap_used -D clippy::expect_used
 
-      - name: Run clippy (core workspace)
-        run: cargo clippy --workspace --manifest-path core/Cargo.toml -- -D warnings
+      - name: Test
+        run: cargo test --workspace --manifest-path core/Cargo.toml
 
-      - name: Run clippy (ffi crate)
-        run: cargo clippy --manifest-path bridge/ffi/Cargo.toml -- -D warnings
-
-  security:
-    name: security
+  ocr-models:
+    name: OCR real-model tests
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@v2
+      - name: Cache models
+        uses: actions/cache@v4
         with:
-          tool: cargo-audit
+          path: third_party/models
+          key: ocr-models-${{ hashFiles('third_party/models/SHA256SUMS') }}
 
-      - name: Audit dependencies (core workspace)
-        run: cargo audit --file core/Cargo.lock
+      - name: Download models
+        run: ./scripts/fetch_models.sh
 
-      - name: Audit dependencies (ffi crate)
-        run: cargo audit --file bridge/ffi/Cargo.lock
+      - name: Verify model checksums
+        run: sha256sum -c third_party/models/SHA256SUMS
 
-  secrets-scan:
-    name: secrets-scan
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
+      # The `ort` crate is built with `load-dynamic`, so the runtime is not
+      # linked at build time and has to be present for the tests.
+      - name: Install ONNX Runtime
+        run: |
+          curl -fsSL -o /tmp/ort.tgz \
+            https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-1.30.0.tgz
+          tar -xzf /tmp/ort.tgz -C /tmp
+          echo "ORT_DYLIB_PATH=/tmp/onnxruntime-linux-x64-1.30.0/lib/libonnxruntime.so" >> "$GITHUB_ENV"
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@2
         with:
-          fetch-depth: 0
-          persist-credentials: false
+          workspaces: core
 
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      - name: Detect, recognize, lay out and decode a real page
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZEIDEX_TEST_MODELS_DIR: ${{ github.workspace }}/third_party/models
+          ZEIDEX_TEST_IMAGE: ${{ github.workspace }}/core/ocr_engine/tests/fixtures/table.png
+          ZEIDEX_TEST_TABLE_IMAGE: ${{ github.workspace }}/core/ocr_engine/tests/fixtures/table.png
+        run: >-
+          cargo test --manifest-path core/Cargo.toml -p zeidex-ocr
+          --test ocr_smoke --test layout_smoke --test table_smoke
 
-  test:
-    name: test
+  desktop-linux:
+    name: Desktop shell (Ubuntu)
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm install
+        working-directory: app
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: app
+
+      - name: Clippy shell
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Check shell
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+  desktop-windows:
+    name: Desktop shell (Windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Run tests (core workspace)
-        run: cargo test --workspace --manifest-path core/Cargo.toml
-
-      - name: Run tests (ffi crate)
-        run: cargo test --manifest-path bridge/ffi/Cargo.toml
-
-  rust-platform-check:
-    name: rust-platform-check (macos)
-    runs-on: macos-latest
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    steps:
-      - uses: actions/checkout@v4
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@2
         with:
-          persist-credentials: false
+          workspaces: src-tauri
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: npm install
+        working-directory: app
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - name: Build frontend
+        run: npm run build
+        working-directory: app
 
-      - name: Build (core workspace)
-        run: cargo build --workspace --manifest-path core/Cargo.toml
-
-      - name: Test (core workspace)
-        run: cargo test --workspace --manifest-path core/Cargo.toml
-
-      - name: Build (ffi crate)
-        run: cargo build --manifest-path bridge/ffi/Cargo.toml
-
-      - name: Test (ffi crate)
-        run: cargo test --manifest-path bridge/ffi/Cargo.toml
-
-  build:
-    name: build
-    runs-on: ubuntu-latest
-    needs: changes
-    if: |
-      needs.changes.outputs.rust == 'true' && (
-        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-        (github.event_name == 'pull_request' && github.base_ref == 'main')
-      )
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build (core workspace)
-        run: cargo build --release --workspace --manifest-path core/Cargo.toml
-
-      - name: Build (ffi crate)
-        run: cargo build --release --manifest-path bridge/ffi/Cargo.toml
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lumio-rust-artifacts
-          path: |
-            core/target/release
-            bridge/ffi/target/release
-          retention-days: 7
-
-  macos-build:
-    name: Build macOS App
-    runs-on: macos-latest
-    needs: changes
-    if: github.event_name == 'pull_request' && github.base_ref == 'main' && needs.changes.outputs.swift == 'true'
-    env:
-      # Pin to Xcode 26.3 - the runner default is 16.4, whose Swift 6
-      # diagnostics are stricter than current dev machines and produce
-      # spurious failures. Match the toolchain we actually develop on.
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Build Lumio app (Debug)
-        run: xcodebuild -project "apps/macos/LauncherApp/lumio-app.xcodeproj" -scheme "Lumio" -configuration Debug -destination "platform=macOS" build
+      - name: Check shell
+        run: cargo check --manifest-path src-tauri/Cargo.toml

@@ -4,10 +4,10 @@ use crate::platform::paths::{
     candidate_id_path_component, expand_with_home, path_is_same_or_child,
 };
 use crate::platform::windows;
-use lumio_indexing::{Candidate, CandidateKind};
 use std::collections::HashSet;
 use std::fs;
 use std::sync::mpsc;
+use zeidex_indexing::{Candidate, CandidateKind};
 
 pub(crate) fn discover_installed_apps(config: &RuntimeConfig, tx: mpsc::SyncSender<Candidate>) {
     let roots = windows::merged_app_scan_roots(

@@ -12,6 +12,16 @@ target/
 result
 result-*
 
+# Tauri / React desktop shell
+app/node_modules/
+app/dist/
+src-tauri/gen/
+
+# Downloaded OCR models (large binaries; see make models)
+third_party/models/*.onnx
+third_party/models/*.txt
+third_party/models/SHA256SUMS
+
 .env
 .env.*
 

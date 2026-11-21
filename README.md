@@ -1,177 +1,378 @@
-<div align="center">
-    <img src="apps/macos/LauncherApp/lumio-app/Assets.xcassets/AppIcon.appiconset/icon_256x256@2x.png" width=160 height=160>
-    <h1>Lumio</h1>
-    <p><strong>A fast, free and open-source keyboard launcher for macOS.</strong></p>
-    <p>Press <code>Option+Space</code> and get results as you type. A Rust core searches apps, files, folders, clipboard history and text inside images and PDFs (OCR) in milliseconds, behind a native SwiftUI interface. Everything runs locally on your Mac.</p>
-    <p>A fork of <a href="https://github.com/kunkka19xx/look"><strong>kunkka19xx/look</strong></a>. Huge thanks to <a href="https://github.com/kunkka19xx">kunkka19xx</a> for the original work this project builds on.</p>
-</div>
-
-<div align="center">
-
-[![Download](https://img.shields.io/badge/download-latest-brightgreen?style=flat-square)](https://github.com/cavaldos/Lumio/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/cavaldos/Lumio/total?style=flat-square)](https://github.com/cavaldos/Lumio/releases)
-![Platform](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
-![Requirements](https://img.shields.io/badge/requirements-macOS%2015%2B-fa4e49?style=flat-square)
-[![GitHub stars](https://img.shields.io/github/stars/cavaldos/Lumio?style=flat-square)](https://github.com/cavaldos/Lumio/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/cavaldos/Lumio?style=flat-square)](https://github.com/cavaldos/Lumio/network/members)
-[![License](https://img.shields.io/github/license/cavaldos/Lumio?style=flat-square)](LICENSE)
-[![Sponsor](https://img.shields.io/badge/Sponsor%20%E2%9D%A4%EF%B8%8F-8A2BE2?style=flat-square)](https://ko-fi.com/calvados)
-
-</div>
-
-## Demo
-
 <p align="center">
-  <a href="https://github.com/cavaldos/Lumio/raw/main/assets/lumio-ui/video-demo.mp4">
-    <img src="assets/lumio-ui/demo.gif" alt="Lumio demo" width="100%">
-  </a>
+  <picture>
+    <source srcset="assets/brand/zeidex-hero-static.png" media="(prefers-reduced-motion: reduce)" />
+    <source srcset="assets/brand/zeidex-hero-animated.gif" type="image/gif" />
+    <img
+      src="assets/brand/zeidex-hero-static.png"
+      alt="Zeidex Studio — offline launcher and document AI"
+      width="900"
+      height="300"
+    />
+  </picture>
 </p>
 
-## Screenshots
+<h1 align="center">Zeidex Studio</h1>
 
 <p align="center">
-  <img src="assets/lumio-ui/1.png" alt="Lumio app search" width="100%">
+  <strong>Find anything. Launch anything. Turn paper into editable documents — all without leaving your machine.</strong>
 </p>
+
 <p align="center">
-  <img src="assets/lumio-ui/2.png" alt="Lumio dictionary lookup" height="300">
-  <img src="assets/lumio-ui/3.png" alt="Lumio translation" height="300">
-  <img src="assets/lumio-ui/4.png" alt="Lumio Setting" height="300">
+  <a href="LICENSE"><img alt="Licence: GPL-3.0-or-later" width="148" height="20" src="https://img.shields.io/badge/licence-GPL--3.0--or--later-22d3ee?style=flat-square" /></a>
+  <img alt="Platforms: macOS, Windows, Linux" width="216" height="20" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-1f2733?style=flat-square" />
+  <img alt="Rust 1.99" width="83" height="20" src="https://img.shields.io/badge/rust-1.99-b7410e?style=flat-square&logo=rust" />
+  <img alt="Tauri 2" width="73" height="20" src="https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri" />
+  <img alt="React 19" width="81" height="20" src="https://img.shields.io/badge/React-19-0b7285?style=flat-square&logo=react" />
+  <img alt="No telemetry" width="100" height="20" src="https://img.shields.io/badge/telemetry-none-2f855a?style=flat-square" />
 </p>
 
-## How Lumio compares
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#document-studio">Document Studio</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#contributing">Contributing</a>
+</p>
 
-Lumio is in the same family as Spotlight, Alfred and Raycast: a keyboard launcher for apps, files and quick tools. The difference is that Lumio is free and open source, and it adds OCR search inside images and PDFs and a dictionary lookup on any selected word.
+---
 
-| | Lumio | Spotlight | [Alfred](https://www.alfredapp.com) | [Raycast](https://www.raycast.com) |
-| --- | --- | --- | --- | --- |
-| Price | Free | Free, built into macOS | Free core; paid Powerpack license for workflows, clipboard and snippets | Free core; paid Pro plan for cloud sync and AI |
-| Open source | Yes (GPL-3.0) | No | No | No |
-| Platform | macOS 15+, Apple Silicon | macOS | macOS | macOS |
-| App and file search | Yes | Yes | Yes | Yes |
-| Calculator | Yes (`+ - * / % ^ ()`) | Yes | Yes | Yes |
-| Clipboard history | Yes | — | Yes (Powerpack) | Yes |
-| OCR search in images and PDFs | Yes, dedicated tab | PDF text | Via workflows | Via extensions |
-| Dictionary lookup on selected text | Yes, `Option+Space` | Yes (Look Up) | Via workflows | Via extensions |
-| Translation | Yes, on-device with Apple's Translation framework, no API key | — | Via workflows | Via extensions |
-| Extensions and workflows | No, built-in modes only | Limited (Shortcuts) | Yes, large workflow community | Yes, extension store (TypeScript) |
-| Window management | No | No | Via workflows | Yes, built in |
-| AI chat | No | — | Via workflows | Yes (Pro) |
+## The short version
 
-**Choose Lumio if** you want a free, open-source launcher that keeps your files and clipboard on your Mac, finds text inside screenshots and scanned PDFs, and does not need an account or a subscription.
+Zeidex Studio is a desktop launcher **and** an offline document AI in one binary.
+Press <kbd>Alt</kbd>+<kbd>Space</kbd>, type three letters, hit <kbd>Enter</kbd>: an app opens,
+a folder appears, a calculation is on your clipboard. Drop a scan or a PDF into the
+Studio and you get **editable Word and Excel files** — layout, tables, merged cells and
+Arabic right-to-left text included.
 
-**Choose Raycast or Alfred if** you need an extension ecosystem, window management, AI chat or a large library of ready-made workflows. Both are more mature and more extensible than Lumio.
+Nothing is uploaded. There is no account, no sync, no telemetry, and no network call
+in the indexing or OCR path. The only feature that talks to the internet is translation,
+because that is what translation is.
 
-**Choose Spotlight if** you want zero setup and only need basic app, file and web search. It is already on your Mac.
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Everything is local</h3>
+      <p>Search runs against a SQLite index of your apps, files and folders. OCR runs on
+      ONNX Runtime with models that ship separately and load from disk. Pull the network
+      cable and the app still works.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Native, not a browser tab</h3>
+      <p>A Tauri shell around a Rust core: one native binary instead of a bundled
+      Chromium, native menus and tray, and a global hotkey that works while the window
+      is hidden.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Arabic is a first-class citizen</h3>
+      <p>Recognition, BiDi reordering, right-to-left layout, and RTL-aware Word/Excel
+      exports. The interface flips with one click, using logical CSS properties so
+      nothing drifts out of place.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Documents, not text dumps</h3>
+      <p>Titles, lists, figures, tables with row/col spans — all preserved into a
+      <code>.docx</code> that opens as a real table, and a <code>.xlsx</code> with numeric
+      cells and merged ranges.</p>
+    </td>
+  </tr>
+</table>
 
-**Lumio's limits.** No plugin or workflow system, no window management, no AI features, no cloud sync, and it runs only on Apple Silicon Macs with macOS 15 or later.
+## What it does
 
-_Competitor features and pricing change often. Check their websites for the latest details._
+### Launcher
 
-## Install
+One input, four modes. <kbd>Tab</kbd> cycles the filter, <kbd>↑</kbd>/<kbd>↓</kbd> move,
+<kbd>Enter</kbd> runs, <kbd>Esc</kbd> hides the window.
 
-Requires macOS 15 or later on Apple Silicon.
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/launcher-search.png" alt="Searching apps, files and folders from the launcher" /></td>
+    <td width="50%"><img src="assets/screenshots/launcher-arabic-search.png" alt="The same launcher in Arabic, right to left" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Fuzzy search across apps, files and folders, ranked by match quality <em>and</em> how you actually use them.</sub></td>
+    <td align="center"><sub>Full RTL: tabs, results, counts, and the documents you export.</sub></td>
+  </tr>
+</table>
 
-**Homebrew** (recommended, updates with `brew upgrade`):
+| | |
+| --- | --- |
+| **Search** | Fuzzy matching with accent/case folding, alias groups (`alias_code=Visual Studio Code\|Cursor\|Zed`), and a usage-aware re-rank so the thing you open every morning wins ties. |
+| **Calculator** | Type an expression and it is evaluated as you type. <kbd>Enter</kbd> copies the raw, re-parseable number — not the prettified `1,000,000`. |
+| **Clipboard history** | Every text clip is stored locally in SQLite, de-duplicated, searchable, pinnable, and never expires unless you say so. |
+| **Translation** | `tr"` followed by text translates into Arabic, English, French and Spanish. Each target fails independently, so one rate-limited request cannot break the panel. |
+| **Web search / URLs** | Type a URL to open it, or a phrase to search the web in your default browser. |
+| **Preferences** | Preferred editor and terminal are resolved per platform, so “open in editor” means the right editor. |
 
-```bash
-brew tap cavaldos/tap
-brew install --cask cavaldos/tap/lumio
+Keyboard reference:
+
+| Key | Action |
+| --- | --- |
+| <kbd>Alt</kbd>+<kbd>Space</kbd> | Show or hide the launcher (global, works while hidden) |
+| <kbd>↑</kbd> <kbd>↓</kbd> | Move the selection |
+| <kbd>Enter</kbd> | Run the selected result, or copy the calculator result |
+| <kbd>Esc</kbd> | Hide the window |
+| <kbd>Tab</kbd> | Cycle All → Apps → Files → Clipboard |
+
+<table>
+  <tr>
+    <td width="33.3%"><img src="assets/screenshots/launcher-calculator.png" alt="Inline calculator result" /></td>
+    <td width="33.3%"><img src="assets/screenshots/launcher-clipboard.png" alt="Clipboard history with pin and delete" /></td>
+    <td width="33.3%"><img src="assets/screenshots/launcher-translate.png" alt="Translation into four languages" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Calculator: <kbd>Enter</kbd> copies the raw value.</sub></td>
+    <td align="center"><sub>Clipboard: pinned clips survive the retention sweep.</sub></td>
+    <td align="center"><sub>Translation: four targets, each failing on its own.</sub></td>
+  </tr>
+</table>
+
+### Document Studio
+
+Images and PDFs go in; a structured page comes out. Every box is editable, every table
+is a real table, and the export is a document you can keep working in.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/studio-document.png" alt="Document Studio: page preview with detected regions and editable text" /></td>
+    <td width="50%"><img src="assets/screenshots/studio-table.png" alt="Document Studio: table region with editable cells" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Layout regions on the left, editable text on the right. Click a box to jump to its editor.</sub></td>
+    <td align="center"><sub>SLANet recovers the grid, including row and column spans, before export.</sub></td>
+  </tr>
+</table>
+
+The pipeline, all on-device:
+
+```text
+image / PDF page
+   │
+   ├─▶ layout        PicoDet (PP-StructureV2, 5 classes)  ──▶ title · text · list · table · figure
+   │
+   ├─▶ text lines    DBNet (PP-OCRv4 det)  ──▶ boxes scaled back and unclipped
+   │        └─▶ recognition  PP-OCRv4 (English / Arabic dictionaries)
+   │                 └─▶ Arabic BiDi reordering  ──▶ logical-order text
+   │
+   └─▶ tables        SLANet sequence decoder  ──▶ grid, spans, per-cell text
+                              │
+                              ▼
+                     editable page model
+                              │
+                   ┌──────────┴──────────┐
+                   ▼                     ▼
+              .docx (RTL bidi,      .xlsx (RTL sheet,
+              native tables,        numeric cells,
+              merged cells)         merged ranges)
 ```
 
-This also adds a `lumio` command to your shell.
+Why the details matter:
 
-**Manual:**
+- **Detection boxes are unclipped.** DBNet's probability mask covers only the middle band
+  of a line. Cropping it raw cuts Arabic ascenders and diacritics, so boxes are expanded
+  with PaddleOCR's `unclip` ratio after the scale factor is applied.
+- **Tables are decoded, not guessed.** SLANet emits structural tokens (`<thead>`, `<tr>`,
+  `<tbody>`, `colspan`, `rowspan`); the editor builds the grid from those tokens, so what
+  you see is what the exporter writes.
+- **Arabic is stored in logical order.** The UI shapes it for display; the exporters write
+  logical order with `bidi` set on the paragraph and sheet, which is what Word and Excel
+  expect.
+- **PDFs are rasterized locally** with pdfium — no ghostscript, no cloud converter.
 
-1. Download [`Lumio.dmg`](https://github.com/cavaldos/Lumio/releases/latest/download/Lumio.dmg) from the [latest release](https://github.com/cavaldos/Lumio/releases/latest).
-2. Open it and drag `Lumio.app` into `Applications`.
-3. Clear the quarantine flag. Releases are ad-hoc signed and not notarized, so Gatekeeper would otherwise block the first launch:
+### Privacy
+
+| | |
+| --- | --- |
+| Network calls in search, indexing, OCR and export | **none** |
+| Network calls in translation | Google `gtx` endpoint, only when you use `tr"` |
+| Telemetry, crash reporting, analytics | **none** |
+| Files read | only the ones you index or open |
+| Model downloads | one-time, by `scripts/fetch_models.sh`, checksum-verified |
+
+The database — search index, clipboard history, usage history — lives in your platform's
+data directory: `~/.local/share/zeidex` on Linux, `~/Library/Application Support/zeidex` on
+macOS, `%APPDATA%\zeidex` on Windows. Delete that folder and the app forgets everything.
+The config file is `~/.zeidex/config` on every platform.
+
+## Quick start
+
+### Build from source
+
+Requirements: Rust (pinned by `rust-toolchain.toml`), Node 20+, and the usual
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Lumio.app
+git clone https://github.com/cavaldos/zeidex.git
+cd zeidex
+
+# 1. OCR models, once (≈ 35 MB, checksum-verified)
+make models
+
+# 2. Runtime libraries: ONNX Runtime + pdfium
+#    Put libonnxruntime.{so,dylib,dll} and libpdfium.{so,dylib,dll}
+#    in src-tauri/resources/lib/ so the bundle ships them, or install them
+#    system-wide and set ORT_DYLIB_PATH / ZEIDEX_PDFIUM_LIBRARY.
+
+# 3. Run it
+make frontend-install
+make tauri-dev            # development
+make tauri-build          # release bundles for the current OS
 ```
 
-Then open Lumio and press **`Option+Space`**. Optionally add the `lumio` command: `ln -sf /Applications/Lumio.app/Contents/MacOS/Lumio /opt/homebrew/bin/lumio`.
+`make tauri-build` produces `.deb` + `.appimage` on Linux, `.msi` + `.nsis` on
+Windows, and `.dmg` on macOS. No prebuilt installers are published yet — the app
+depends on platform ONNX Runtime and pdfium builds, which are not vendored here.
 
-**Updates.** Lumio updates itself: it checks once a day and asks before installing a new version. Check right away from Settings → About → **Check for Updates**, where you can also turn the daily check off. Homebrew installs can also update with `brew upgrade --cask lumio`.
-
-For local development, see [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
-
-## Uninstall
-
-**Homebrew:**
+### Verify the build
 
 ```bash
-brew uninstall --cask lumio
-```
-
-Add `--zap` to also remove the settings and data.
-
-**Manual:** quit Lumio, then remove the app, its command and its data:
-
-```bash
-rm -rf /Applications/Lumio.app /opt/homebrew/bin/lumio
-rm -rf ~/.lumio "$HOME/Library/Application Support/lumio"
+make core-test     # the whole Rust workspace
+make core-fmt      # formatting
+make core-clippy   # clippy, unwrap/expect denied in production paths
+make frontend-build
+make ocr-test      # real models, real page — needs ORT_DYLIB_PATH
 ```
 
 ## Usage
 
-| Action | Shortcut |
+| What | How |
 | --- | --- |
-| Show / hide Lumio | `Option+Space` |
-| Settings | `Cmd+Shift+Space` |
-| Open / run | `Enter` |
-| Search the web | `Cmd+Enter` |
-| Show in Finder | `Cmd+F` |
-| Open in your editor / terminal | `Cmd+E` / `Cmd+T` |
-| Actions for the selected item | `Cmd+K` |
-| Move to Trash (delete a clip in clipboard mode) | `Cmd+D` |
-| Hide the selected app from results | `Cmd+Shift+H` |
-| Browse Applications / Folders / Documents / OCR | `Cmd+1` … `Cmd+4` |
-| Cycle result filters | `Tab` / `Shift+Tab` |
-| Command mode | `Cmd+/` |
-| Help | `Cmd+H` |
-| Close | `Esc` |
+| Search | <kbd>Alt</kbd>+<kbd>Space</kbd>, type, <kbd>Enter</kbd> |
+| Calculate | Type the expression; the result row appears above the results |
+| Translate | `tr"` + text |
+| Clipboard history | <kbd>Tab</kbd> to the Clipboard filter |
+| Web search | Type a phrase and pick the web result; type a URL to open it |
+| Documents | **OCR Studio** in the header → **Open file** → **Run OCR** |
 
-Select a word in any app before pressing `Option+Space` and Lumio opens straight on its dictionary entry (needs Accessibility, asked once).
+Configuration lives in `~/.zeidex/config`:
 
-**OCR tab.** Find images and PDFs by the text *inside* them, not just their name. It is the last tab; reading the files runs in a separate process that starts only when you open it, so Lumio itself stays light. See [OCR search](assets/docs/ocr-search.md).
+```ini
+# Preferred tools, used by "open in…" actions
+editor=nvim
+terminal=alacritty
 
-**Commands.** Type `:` or press `Cmd+/`: `:kill <name, PID or port>`, `:emptytrash`, `:help`.
+# Treat these as one app when searching
+alias_code=Visual Studio Code|Cursor|Zed
+```
 
-## Configuration
+## Architecture
 
-Settings live in `~/.lumio/config`, created on first launch: which folders to index, scan depth and limits, ignore patterns, search aliases (`alias_code=Visual Studio Code|Cursor|Zed`), OCR search, the order of the launcher tabs (`tab_order`), clipboard history size, and the editor and terminal behind `Cmd+E` / `Cmd+T`. Change them from Settings (`Cmd+Shift+Space`), or edit the file and press `Cmd+Shift+;` to reload.
+```mermaid
+flowchart TB
+  subgraph UI["Desktop shell — Tauri 2"]
+    React["React 19 + Tailwind 4<br/>launcher · Studio · RTL"]
+  end
 
-## Permissions
+  subgraph Core["Rust core — Cargo workspace"]
+    Engine["zeidex-engine<br/>discovery · query · ranking"]
+    Indexing["zeidex-indexing<br/>candidates"]
+    Matching["zeidex-matching<br/>normalize · fuzzy"]
+    Ranking["zeidex-ranking<br/>usage-aware rerank"]
+    Storage["zeidex-storage<br/>SQLite"]
+    Answers["zeidex-answers<br/>URLs · translate"]
+    OCR["zeidex-ocr<br/>layout · det · rec · tables · bidi · pdf"]
+    Export["zeidex-exporter<br/>docx · xlsx"]
+  end
 
-Lumio works without any special permission. Two are asked for only when you use the feature:
+  SQLite[("SQLite<br/>index · clips · usage")]
+  ONNX["ONNX Runtime<br/>PP-OCRv4 · PP-Structure · SLANet"]
+  PDFium["pdfium<br/>PDF rasterization"]
 
-- **Accessibility**: to read the selected word for a dictionary lookup.
-- **Automation (Finder)**: to empty the Trash, which macOS protects.
+  React -->|"IPC commands"| Engine
+  React -->|"IPC commands"| OCR
+  React -->|"IPC commands"| Export
+  Engine --> Indexing
+  Engine --> Matching
+  Engine --> Ranking
+  Engine --> Storage
+  Engine --> Answers
+  Storage --> SQLite
+  OCR --> ONNX
+  OCR --> PDFium
+```
+
+The Rust workspace builds and tests **without** Tauri, Node or a webview, which is
+why the OCR and export logic can be tested in CI on two operating systems.
+
+| Crate | Responsibility |
+| --- | --- |
+| `zeidex-engine` | Discovery, query parsing, search, platform detection |
+| `zeidex-indexing` | The `Candidate` type and its id scheme |
+| `zeidex-matching` | Query normalization and fuzzy scoring |
+| `zeidex-ranking` | Base score adjusted by exact/prefix match and usage history |
+| `zeidex-storage` | SQLite: candidates, usage events, clips, URL history, settings |
+| `zeidex-tools` | Preferred editor/terminal resolution per platform |
+| `zeidex-answers` | URL classification; translation behind a feature flag |
+| `zeidex-ocr` | The offline document AI pipeline |
+| `zeidex-exporter` | `.docx` and `.xlsx` writers |
+
+## Limits, stated plainly
+
+- **The Arabic recognizer is the weak link.** `arabic_PP-OCRv4_rec` handles shaped,
+  logical-order Arabic but drops characters on very dense lines and does not read
+  Arabic-Indic digits. Scans of clean printed Arabic work; handwriting, calligraphy and
+  low-resolution phone photos do not. Upgrading the recognizer is the top item below.
+- **Tables need visible rules.** SLANet infers the grid from structure tokens; borderless
+  tables can lose a row or column. The cells are editable, so a wrong split is fixable,
+  not fatal.
+- **OCR is CPU-bound.** A 300 dpi A4 page takes several seconds on a laptop and minutes
+  for a 40-page PDF. Detection caps the long side at 1600 px by default
+  (`OcrEngineConfig::det_max_side`) so memory stays bounded on long documents.
+- **Runtime libraries are external.** ONNX Runtime and pdfium are loaded dynamically and
+  are not shipped in this repository.
+- **Models are downloaded, never committed.** `scripts/fetch_models.sh` pulls nine files
+  from Hugging Face mirrors and verifies them against `third_party/models/SHA256SUMS`.
+
+## Roadmap
+
+- [x] Cross-platform Tauri shell replacing the macOS-only SwiftUI app
+- [x] Offline OCR: layout, text lines, tables, Arabic BiDi
+- [x] Editable regions and tables in the Studio
+- [x] `.docx` / `.xlsx` export with RTL support
+- [x] Full RTL interface
+- [ ] Better Arabic recognizer (dense lines, Arabic-Indic digits)
+- [ ] Handwriting and low-quality photo handling
+- [ ] Page-range selection when exporting a PDF
+- [ ] Signed installers for macOS, Windows and Linux
+- [ ] Plugin API for custom result providers
 
 ## Documentation
 
-- [Architecture](assets/docs/architecture.md)
-- [Rust core](assets/docs/core.md)
-- [FFI bridge](assets/docs/ffi-bridge.md)
-- [macOS app](assets/docs/macos-app.md)
-- [OCR search](assets/docs/ocr-search.md)
-- [Build and release](assets/docs/build-and-release.md)
+- [Architecture](assets/docs/architecture.md) — how the shell, the core and the frontend fit together
+- [Rust core](assets/docs/core.md) — crates, search pipeline, OCR internals
+- [OCR Studio](assets/docs/ocr-studio.md) — the document workbench, pane by pane
+- [Build and release](assets/docs/build-and-release.md) — requirements, targets, checks, bundling
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first —
+it covers the commit style, the test gates, and the clippy rules (production paths deny
+`unwrap()` and `expect()`). For a quick start:
 
-## Acknowledgments
+```bash
+make core-test && make core-fmt && make core-clippy && make frontend-build
+```
 
-A fork of [look](https://github.com/kunkka19xx/look) by [kunkka19xx](https://github.com/kunkka19xx). Huge thanks for the original work this project builds on.
+## Licence and attribution
 
-## License
+Zeidex Studio is free software under the **GNU General Public License v3.0 or later**.
+You may use it privately, at work, and commercially; if you distribute it or a modified
+version, the source must stay available under the same licence and the copyright notices
+must be preserved. If you need to embed it in a closed-source product, contact the
+copyright holder to discuss a separate commercial licence.
 
-[GPL-3.0](LICENSE). Lumio is and will always remain open-source and free.
+This project is a derivative of [`kunkka19xx/look`](https://github.com/kunkka19xx/look)
+(GPL-3.0). The original macOS shell is preserved under `legacy/` for reference. Model and
+library attributions are listed in [NOTICE](NOTICE).
 
-## Star History
+<p align="center">
+  <a href="https://star-history.com/#cavaldos/zeidex&Date">
+    <img src="https://api.star-history.com/svg?repos=cavaldos/zeidex&type=Date" alt="Star history" width="640" />
+  </a>
+</p>
 
-<a href="https://star-history.com/#cavaldos/Lumio&Date">
-    <img src="https://api.star-history.com/svg?repos=cavaldos/Lumio&type=Date" alt="Star History Chart" width="500">
-</a>
+<p align="center">
+  <sub>Built with Rust, Tauri, React and ONNX Runtime. No cloud, no account, no telemetry.</sub>
+</p>

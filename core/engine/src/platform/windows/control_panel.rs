@@ -1,13 +1,13 @@
 //! Classic Win32 / MMC applets that Windows Search surfaces but `ms-settings:`
 //! doesn't cover (env vars, Device Manager, Services, Registry, Task Manager,
-//! etc.). The Tauri side handles `lumio-cmd://` paths by splitting on the first
+//! etc.). The Tauri side handles `zeidex-cmd://` paths by splitting on the first
 //! `?` into program + args and spawning via `Command::new`.
 //!
 //! Format:
 //!   - `program` alone        → ShellExecute resolves the .cpl/.msc/.exe by name
 //!   - `program?args`         → spawn with args (e.g. rundll32.exe with a DLL+entry)
 //!
-//! Encoded into the candidate path as `lumio-cmd://program[?args]`.
+//! Encoded into the candidate path as `zeidex-cmd://program[?args]`.
 
 #[derive(Clone, Copy)]
 pub(crate) struct ControlPanelEntry {
@@ -142,7 +142,7 @@ pub(crate) const CONTROL_PANEL_CATALOG: &[ControlPanelEntry] = &[
     },
 ];
 
-pub(crate) const CONTROL_PANEL_SCHEME: &str = "lumio-cmd://";
+pub(crate) const CONTROL_PANEL_SCHEME: &str = "zeidex-cmd://";
 
 /// Build the synthetic path for a Control Panel candidate.
 pub(crate) fn target_path(entry: &ControlPanelEntry) -> String {

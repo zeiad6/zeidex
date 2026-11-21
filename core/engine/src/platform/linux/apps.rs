@@ -2,10 +2,10 @@ use crate::config::RuntimeConfig;
 use crate::index::APP_CANDIDATE_ID_PREFIX;
 use crate::platform::linux;
 use crate::platform::paths::candidate_id_path_component;
-use lumio_indexing::{Candidate, CandidateKind};
 use std::collections::HashSet;
 use std::fs;
 use std::sync::mpsc;
+use zeidex_indexing::{Candidate, CandidateKind};
 
 pub(crate) fn discover_installed_apps(config: &RuntimeConfig, tx: mpsc::SyncSender<Candidate>) {
     let mut seen = HashSet::new();

@@ -5,9 +5,9 @@ use crate::platform::paths::{
 };
 use globset::{GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
-use lumio_indexing::{Candidate, CandidateKind};
 use std::sync::mpsc;
 use std::time::UNIX_EPOCH;
+use zeidex_indexing::{Candidate, CandidateKind};
 
 // One `GlobSet` per path policy: a candidate is normalized once per distinct
 // policy and matched against all patterns of that policy in a single pass.
@@ -215,12 +215,12 @@ mod tests {
     use super::{discover_local_files_and_folders, should_exclude_path};
     use crate::config::RuntimeConfig;
     use crate::platform::paths::compile_ignore_matcher;
-    use lumio_indexing::CandidateKind;
     use std::sync::mpsc;
+    use zeidex_indexing::CandidateKind;
 
     fn temp_path(prefix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
-            "lumio-files-test-{prefix}-{}-{}",
+            "zeidex-files-test-{prefix}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

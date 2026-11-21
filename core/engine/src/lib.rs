@@ -13,17 +13,17 @@ pub mod url_history;
 
 pub use action::{ActionKind, LaunchAction};
 use config::RuntimeConfig;
-/// Re-exported so a shell can validate a usage verb without depending on the
-/// indexing crate for one enum.
-pub use lumio_indexing::UsageAction;
-use lumio_indexing::{Candidate, CandidateIdKind, CandidateKind};
-use lumio_storage::{SearchSettings, SqliteStore, StorageError};
 use normalize::normalize_for_search;
 pub use result::{LaunchResult, LaunchResultAction};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+/// Re-exported so a shell can validate a usage verb without depending on the
+/// indexing crate for one enum.
+pub use zeidex_indexing::UsageAction;
+use zeidex_indexing::{Candidate, CandidateIdKind, CandidateKind};
+use zeidex_storage::{SearchSettings, SqliteStore, StorageError};
 
 const INDEX_UPSERT_CHUNK_SIZE: usize = 512;
 const USAGE_RETENTION_DAYS: i64 = 90;
@@ -81,10 +81,7 @@ impl QueryEngine {
 
     pub fn new_with_config(candidates: Vec<Candidate>, config: &RuntimeConfig) -> Self {
         // Build an in-memory search index up front (hot path reads only).
-        let candidates = candidates
-            .into_iter()
-            .map(IndexedCandidate::new)
-            .collect();
+        let candidates = candidates.into_iter().map(IndexedCandidate::new).collect();
         let search_aliases = config.search_aliases.clone();
 
         Self {
@@ -102,7 +99,7 @@ impl QueryEngine {
     }
 
     /// Natural-language file recall: files/folders filtered by type, modified
-    /// time, and location, ranked most-recent-first. Runs against Lumio's own
+    /// time, and location, ranked most-recent-first. Runs against Zeidex's own
     /// index (fast, no Spotlight); the shell parses the query into a `FileFilter`.
     /// An empty result relaxes the query progressively (see `relaxations`) so
     /// near-misses beat an empty panel; `relaxation` reports which fallback
@@ -285,7 +282,7 @@ impl QueryEngine {
         }
 
         if let Err(err) = producer_handle.join() {
-            eprintln!("lumio index: producer worker panicked: {err:?}");
+            eprintln!("zeidex index: producer worker panicked: {err:?}");
         }
 
         // Stale-row sweep. The `ALL` branch keeps the "discovered something"

@@ -1,52 +1,83 @@
 # Build and release
 
-Run everything from the repo root. `Makefile` includes `scripts/Makefile.mac`; `make help` lists every target.
+Run everything from the repo root. `make help` lists every target.
 
 ## Requirements
 
-macOS 15+, Xcode 26, Rust stable and nightly, GNU Make.
+- Rust 1.99.1 (pinned by `rust-toolchain.toml`; the core declares 1.88 as the
+  minimum but edition 2024 is built with the pinned toolchain in practice).
+- Node.js and npm for the frontend.
+- Platform webview dependencies: `libwebkit2gtk-4.1-dev`, `librsvg2-dev`,
+  `patchelf` on Debian/Ubuntu; the Tauri CLI's prerequisites on macOS and
+  Windows.
+- ONNX Runtime and pdfium shared libraries at runtime. They are not vendored:
+  put `libonnxruntime.so` / `onnxruntime.dll` / `libonnxruntime.dylib` (and the
+  pdfium equivalent) into `src-tauri/resources/lib/`, or install them
+  system-wide. `ORT_DYLIB_PATH` and `ZEIDEX_PDFIUM_LIBRARY` override the lookup.
 
 ## Common targets
 
 | Command | Does |
 | --- | --- |
-| `make app-run` | Debug build, launched with `~/.lumio/config.dev` |
-| `make app-run-dev` | Installs a side-by-side `/Applications/Lumio Dev.app` and runs it |
-| `make app-logs` | Follow the app's logs |
-| `make db-path`, `db-status`, `db-shell`, `db-reset` | Inspect or reset the SQLite index |
-| `make icons` | Regenerate the app icon from `assets/icon-source.png` |
+| `make core-test` | `cargo test` the core workspace |
+| `make core-clippy` | clippy the core, denying `unwrap`/`expect` in production code |
+| `make core-fmt` | `cargo fmt --check` the core |
+| `make ocr-test` | run the real-model OCR tests against `third_party/models` |
+| `make frontend-install` | `npm install` in `app/` |
+| `make frontend-build` | typecheck + build the React app |
+| `make tauri-dev` | run the desktop app in development mode |
+| `make tauri-build` | build the release bundle |
+| `make models` | download the ONNX models into `third_party/models` |
+
+`make ocr-test` needs an ONNX Runtime shared library; it exports
+`ORT_DYLIB_PATH` from `ZEIDEX_ORT_DYLIB` if you set it, otherwise it uses the
+`ORT_DYLIB_PATH` already in the environment. The fixture page is committed
+(`core/ocr_engine/tests/fixtures/table.png`), so no extra assets are needed.
 
 ## Checks
 
 ```bash
-cargo test --workspace --manifest-path core/Cargo.toml
-cargo test --manifest-path bridge/ffi/Cargo.toml
+make core-test
+make core-clippy
+make ocr-test        # after `make models`
+make frontend-build
+cd src-tauri && cargo check
 ```
 
-## Local DMG
+CI (`.github/workflows/ci.yml`) runs on pull requests and manual dispatch:
 
-```bash
-./scripts/build.sh            # release/Lumio.dmg (Release, Apple Silicon, ad-hoc signed)
-./scripts/build.sh v1.2.3     # same, with the version shown in About
-```
+- **core** — fmt, clippy (`unwrap`/`expect` denied) and tests on Ubuntu and
+  Windows.
+- **ocr-models** — downloads the models (cached on `SHA256SUMS`), fetches the
+  ONNX Runtime release, and runs the real-model detection, recognition, layout
+  and table tests. This is the job that would catch a decoder regression the
+  unit tests cannot see.
+- **desktop (Ubuntu, Windows)** — installs the frontend, builds it, runs clippy
+  with `-D warnings`, and `cargo check`s the shell.
 
-## Releasing (maintainers)
+## Bundling
 
-```bash
-./scripts/release.sh v1.2.3
-```
+`npm run tauri build` (from `app/`) produces the per-platform bundles listed in
+`src-tauri/tauri.conf.json`: `.deb`, `.AppImage`, `.msi`, `.nsis` and `.dmg`.
+The bundle icons live in `src-tauri/icons/`.
 
-`release.sh` refuses a dirty tree or a commit that is not on `origin/main`, runs the cargo tests and `build.sh`, then pushes the `v*` tag. That tag starts `.github/workflows/release.yml`, which:
+`bundle.resources` in `src-tauri/tauri.conf.json` copies:
 
-1. builds `Lumio.dmg` with `build.sh`,
-2. publishes the GitHub release,
-3. runs `notify-update.sh` (the `notify-users` job).
+| From | To | Why |
+| --- | --- | --- |
+| `../third_party/models/*` | `<resources>/models/` | the app is offline; the models must ship |
+| `resources/lib/*` | `<resources>/lib/` | ONNX Runtime and pdfium shared libraries |
 
-`notify-update.sh` reaches users two ways:
+The models glob is required, so **run `make models` before `tauri build`**; a
+missing model folder fails the bundle instead of shipping an app that cannot
+OCR. `resources/lib/` always contains a `README.txt`, which keeps the glob
+valid while the folder is empty in a source checkout.
 
-- **Sparkle**: adds the release to `lumio/appcast.xml` in [cavaldos/macos-app-releases](https://github.com/cavaldos/macos-app-releases) (shared with other apps), served at `https://cavaldos.github.io/macos-app-releases/lumio/appcast.xml`. Lumio v0.0.5 and older still read `cavaldos/lumio-releases`, so the appcast is mirrored there too; once most users have updated, set `LEGACY_REPO=""` in `scripts/notify-update.sh`, drop `LUMIO_RELEASES_DEPLOY_KEY`, and delete that repo.
-- **Homebrew**: points the `lumio` cask in [cavaldos/homebrew-tap](https://github.com/cavaldos/homebrew-tap) at the new DMG.
+At startup the shell points `ORT_DYLIB_PATH` at a bundled runtime (if any) and
+resolves the model directory as: `ZEIDEX_MODELS_DIR` → bundled
+`<resources>/models` → a development checkout (`third_party/models`) → the
+per-user data dir.
 
-Rules: the version comes from the tag (`vX.Y.Z`), is never reused, and must be newer than the last release. Updates are EdDSA-signed; never rotate the key, or installed apps will reject updates. The `notify-users` job needs the secrets `SPARKLE_PRIVATE_KEY`, `MACOS_APP_RELEASES_DEPLOY_KEY`, `LUMIO_RELEASES_DEPLOY_KEY` and `HOMEBREW_TAP_DEPLOY_KEY`.
-
-CI (`ci.yml`) is manual only (`workflow_dispatch`).
+Release automation (tag → DMG → appcast → Homebrew) is not carried over from the
+macOS shell yet; see `legacy/` for the old `release.yml`, `build.sh` and
+`notify-update.sh`. The Tauri shell has no update checker.

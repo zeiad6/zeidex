@@ -4,11 +4,11 @@ use crate::platform;
 use crate::platform::paths::compile_ignore_matcher;
 use crate::platform::paths::expand_with_home;
 use globset::GlobBuilder;
-use lumio_tools::Tools;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use zeidex_tools::Tools;
 
 pub const APP_SCAN_DEPTH: usize = 3;
 pub const APP_EXCLUDE_PATHS: [&str; 0] = [];
@@ -126,7 +126,7 @@ impl Default for RuntimeConfig {
     }
 }
 
-/// Process-wide cache of the parsed `~/.lumio/config`. Filled lazily by
+/// Process-wide cache of the parsed `~/.zeidex/config`. Filled lazily by
 /// `RuntimeConfig::load_cached()`, cleared by `RuntimeConfig::invalidate_cache()`.
 /// Reading the config from disk is cheap (< 1 KB file) but happens on every
 /// `bootstrap_sqlite_scoped` / `from_sqlite` - including watcher-triggered
@@ -138,7 +138,7 @@ fn cached_config_slot() -> &'static Mutex<Option<RuntimeConfig>> {
 }
 
 impl RuntimeConfig {
-    /// Reads `~/.lumio/config` from disk and parses it. Always touches the file.
+    /// Reads `~/.zeidex/config` from disk and parses it. Always touches the file.
     /// Most callers should use [`load_cached`](Self::load_cached) instead.
     pub fn load() -> Self {
         let mut config = Self::default();
@@ -168,7 +168,7 @@ impl RuntimeConfig {
 
     /// Returns the cached `RuntimeConfig`, reading from disk on first call only.
     /// Subsequent calls clone the cached value (cheap - the struct is plain
-    /// data). Callers that mutate `~/.lumio/config` at runtime must call
+    /// data). Callers that mutate `~/.zeidex/config` at runtime must call
     /// [`invalidate_cache`](Self::invalidate_cache) afterwards.
     pub fn load_cached() -> Self {
         let slot = cached_config_slot();
@@ -204,7 +204,7 @@ impl RuntimeConfig {
         Self::load_cached().tools
     }
 
-    /// Drops the cached config. Call after `~/.lumio/config` is edited so the
+    /// Drops the cached config. Call after `~/.zeidex/config` is edited so the
     /// next `load_cached()` re-reads from disk.
     pub fn invalidate_cache() {
         let mut guard = cached_config_slot()
@@ -341,14 +341,14 @@ impl RuntimeConfig {
                         apply_alias_override(alias_key, value, &mut self.search_aliases);
                     }
                 }
-                _ if lumio_tools::key::ALL.contains(&key) => self.tools.set(key, value),
+                _ if zeidex_tools::key::ALL.contains(&key) => self.tools.set(key, value),
                 _ => {}
             }
         }
     }
 }
 
-/// Where the config lives, migrating a legacy `~/.lumio.config` into `~/.lumio/`
+/// Where the config lives, migrating a legacy `~/.zeidex.config` into `~/.zeidex/`
 /// the first time. One resolver for every caller: see `crate::config_path`.
 fn config_path() -> Option<PathBuf> {
     crate::config_path::current().map(|resolved| resolved.path)
@@ -399,7 +399,7 @@ fn append_missing_default_config_entries(path: &Path) {
         appended.push('\n');
     }
     appended.push('\n');
-    appended.push_str("# Added by lumio update\n");
+    appended.push_str("# Added by zeidex update\n");
     for entry in missing_entries {
         appended.push_str(&entry);
         appended.push('\n');
@@ -426,7 +426,7 @@ fn default_config_contents() -> String {
         "0.55"
     };
     format!(
-        "# lumio configuration\n\
+        "# zeidex configuration\n\
 # Generated on first launch. Edit values, then reload with Cmd+Shift+;\n\
 # (Ctrl+Shift+; on Linux and Windows).\n\
 \n\
@@ -458,11 +458,11 @@ skip_dir_names=node_modules,target,build,dist,library,applications,old firefox d
 # Pinned clips are kept on top of this.\n\
 clipboard_history_limit=1000\n\
 \n\
-# How long the main query survives while Lumio is hidden, in seconds. 0 clears\n\
+# How long the main query survives while Zeidex is hidden, in seconds. 0 clears\n\
 # it on every hide; a negative value keeps it indefinitely.\n\
 query_retention_seconds=5\n\
 \n\
-# Preferred tools. Name the tool, not a command: Lumio knows how to drive it,\n\
+# Preferred tools. Name the tool, not a command: Zeidex knows how to drive it,\n\
 # including running a terminal editor inside your terminal. Declare nothing and\n\
 # nothing changes. Editing uses text_editor on a file and code_editor on a\n\
 # folder; declaring only one of the two covers both.\n\
@@ -926,8 +926,8 @@ mod tests {
     fn expand_path_preserves_windows_absolute_paths() {
         let home = Some("C:\\Users\\demo");
         assert_eq!(
-            expand_path("C:\\Program Files\\Lumio", home),
-            "C:\\Program Files\\Lumio"
+            expand_path("C:\\Program Files\\Zeidex", home),
+            "C:\\Program Files\\Zeidex"
         );
         assert_eq!(
             expand_path("\\\\server\\share\\folder", home),
@@ -956,7 +956,7 @@ mod tests {
     #[test]
     fn skip_dir_names_from_config_are_appended_not_replaced() {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-{}-{}",
+            "zeidex-config-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -983,7 +983,7 @@ mod tests {
     #[test]
     fn lazy_indexing_enabled_is_loaded_from_config() {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-lazy-indexing-{}-{}",
+            "zeidex-config-test-lazy-indexing-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1010,7 +1010,7 @@ mod tests {
 
     fn config_from(contents: &str, label: &str) -> RuntimeConfig {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-{label}-{}-{}",
+            "zeidex-config-test-{label}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1038,7 +1038,7 @@ mod tests {
 
     #[test]
     fn every_tool_key_loads_from_config() {
-        let declared = lumio_tools::key::ALL
+        let declared = zeidex_tools::key::ALL
             .iter()
             .map(|key| format!("{key}=ghostty\n"))
             .collect::<String>();
@@ -1081,7 +1081,7 @@ mod tests {
         }
     }
 
-    /// `browser` parses, but no action reads it yet: Lumio has no URL row for it
+    /// `browser` parses, but no action reads it yet: Zeidex has no URL row for it
     /// to act on. Advertising it would make it a key a user can set and get
     /// silence from, which is the trap `specs/preferred-tools.md` §6 calls out.
     /// Document it here when something consumes it.
@@ -1097,24 +1097,24 @@ mod tests {
             );
         }
 
-        let unadvertised: Vec<_> = lumio_tools::key::ALL
+        let unadvertised: Vec<_> = zeidex_tools::key::ALL
             .iter()
             .filter(|key| !ADVERTISED_TOOL_KEYS.contains(key))
             .collect();
-        assert_eq!(unadvertised, vec![&lumio_tools::key::BROWSER]);
+        assert_eq!(unadvertised, vec![&zeidex_tools::key::BROWSER]);
     }
 
     const ADVERTISED_TOOL_KEYS: &[&str] = &[
-        lumio_tools::key::TEXT_EDITOR,
-        lumio_tools::key::CODE_EDITOR,
-        lumio_tools::key::TERMINAL,
-        lumio_tools::key::FILE_MANAGER,
+        zeidex_tools::key::TEXT_EDITOR,
+        zeidex_tools::key::CODE_EDITOR,
+        zeidex_tools::key::TERMINAL,
+        zeidex_tools::key::FILE_MANAGER,
     ];
 
     #[test]
     fn localized_app_names_defaults_to_false_and_loads_from_config() {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-localized-app-names-{}-{}",
+            "zeidex-config-test-localized-app-names-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1143,7 +1143,7 @@ mod tests {
     #[test]
     fn alias_entries_are_loaded_from_config() {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-aliases-{}-{}",
+            "zeidex-config-test-aliases-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1179,7 +1179,7 @@ mod tests {
     #[test]
     fn alias_entry_can_remove_default_alias() {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-alias-remove-{}-{}",
+            "zeidex-config-test-alias-remove-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1205,7 +1205,7 @@ mod tests {
         // ignored_patterns_more=/Users/demo/Project/**/*.tmp|[invalid
         // lazy_indexing_enabled=false
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-ignored-patterns-{}-{}",
+            "zeidex-config-test-ignored-patterns-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1241,7 +1241,7 @@ mod tests {
         // ignored_patterns_spaces= |  |
         // lazy_indexing_enabled=false
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-ignored-patterns-empty-{}-{}",
+            "zeidex-config-test-ignored-patterns-empty-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1268,7 +1268,7 @@ mod tests {
     fn ignored_pattern_windows_style_path_is_accepted() {
         // Case: ignored_patterns_windows=C:\Users\me\AppData\Local\Temp\**\*.etl
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-ignored-patterns-windows-{}-{}",
+            "zeidex-config-test-ignored-patterns-windows-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1302,7 +1302,7 @@ mod tests {
     #[test]
     fn windows_pattern_from_config_ignores_backslash_candidate() {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-ignored-patterns-walk-{}-{}",
+            "zeidex-config-test-ignored-patterns-walk-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1408,7 +1408,7 @@ mod tests {
     #[test]
     fn commented_out_key_is_not_resurrected_by_update() {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-commented-{}-{}",
+            "zeidex-config-test-commented-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1469,7 +1469,7 @@ mod tests {
     #[test]
     fn ensure_default_config_file_appends_missing_keys_without_overwriting_existing() {
         let tmp = std::env::temp_dir().join(format!(
-            "lumio-config-test-migrate-{}-{}",
+            "zeidex-config-test-migrate-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -1,18 +1,18 @@
 //! Frecency ranking for launcher-opened URL history (url-history spec).
 //!
-//! `lumio_storage::recent_urls` returns raw rows; this module scores them with
+//! `zeidex_storage::recent_urls` returns raw rows; this module scores them with
 //! the exact `rank_score` the engine applies to matched candidates, so a
 //! remembered URL rises among local results by the same math as apps/files,
 //! not an arbitrary hit-count threshold. Lives in the engine (not per shell)
 //! so macOS (via bridge/ffi) and linows rank identically.
 
 use crate::config::SCORE_TITLE_CONTAINS;
-use lumio_indexing::{Candidate, CandidateKind};
-use lumio_ranking::rank_score;
-use lumio_storage::UrlHistoryEntry;
 use serde::Serialize;
+use zeidex_indexing::{Candidate, CandidateKind};
+use zeidex_ranking::rank_score;
+use zeidex_storage::UrlHistoryEntry;
 
-/// Wire shape of a scored URL-history row. `lumio_storage::UrlHistoryEntry` is
+/// Wire shape of a scored URL-history row. `zeidex_storage::UrlHistoryEntry` is
 /// not `Serialize` (that crate has no serde dep), so it is mapped here; both
 /// shells serialise this struct as-is.
 #[derive(Debug, Serialize)]

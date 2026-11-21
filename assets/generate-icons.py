@@ -3,7 +3,7 @@
 # requires-python = ">=3.9"
 # dependencies = ["pillow>=10", "numpy>=1.24"]
 # ///
-"""Build Lumio's full app icon set from one source image.
+"""Build Zeidex's full app icon set from one source image.
 
     pipx run assets/generate-icons.py                  # uses assets/icon-source.png
     pipx run assets/generate-icons.py ~/Desktop/new.png
@@ -20,7 +20,7 @@ Steps:
      is shaved off. The outline is then redrawn at 4x and scaled down, so the
      edge is smooth with no dark fringe.
   3. Trim. Empty margin is cropped away and the shape is centered on Apple's
-     macOS icon grid (824 px inside a 1024 px canvas), so Lumio sits at the
+     macOS icon grid (824 px inside a 1024 px canvas), so Zeidex sits at the
      same size as other apps in the Dock. `--padding 0` fills the canvas.
   4. Output. Every size in AppIcon.appiconset, which Xcode compiles into the
      app and the README shows, plus assets/icon.png (the 1024 px master).
@@ -45,7 +45,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE = ROOT / "assets" / "icon-source.png"
 PREVIEW_PATH = ROOT / "assets" / "icon.png"
-APPICONSET = ROOT / "apps/macos/LauncherApp/lumio-app/Assets.xcassets/AppIcon.appiconset"
+APPICONSET = ROOT / "apps/macos/LauncherApp/zeidex-app/Assets.xcassets/AppIcon.appiconset"
 
 CANVAS = 1024
 # Apple's macOS grid: the icon shape is 824 px wide, centered on 1024.
@@ -174,7 +174,7 @@ def write_iconset(master: Image.Image, folder: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate Lumio's app icon set from one image.")
+    parser = argparse.ArgumentParser(description="Generate Zeidex's app icon set from one image.")
     parser.add_argument("source", nargs="?", type=Path, default=DEFAULT_SOURCE,
                         help=f"source image, ideally 1024 px or larger (default: {DEFAULT_SOURCE.relative_to(ROOT)})")
     parser.add_argument("--padding", type=int, default=DEFAULT_PADDING,

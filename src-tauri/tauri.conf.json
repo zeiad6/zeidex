@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Zeidex Studio",
+  "version": "0.1.0",
+  "identifier": "com.cavaldos.zeidex",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../app/dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Zeidex Studio",
+        "width": 760,
+        "height": 520,
+        "minWidth": 520,
+        "minHeight": 360,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": true,
+        "decorations": false,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false,
+        "alwaysOnTop": true,
+        "focus": true,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "copyright": "GPL-3.0-or-later",
+    "targets": [
+      "deb",
+      "appimage",
+      "msi",
+      "nsis",
+      "dmg"
+    ],
+    "resources": {
+      "../third_party/models/*": "models/",
+      "resources/lib/*": "lib/"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ]
+  },
+  "mainBinaryName": "zeidex"
+}

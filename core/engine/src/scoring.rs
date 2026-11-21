@@ -1,8 +1,8 @@
 use crate::config::*;
-use lumio_indexing::CandidateIdKind;
-use lumio_indexing::{Candidate, CandidateKind};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use zeidex_indexing::CandidateIdKind;
+use zeidex_indexing::{Candidate, CandidateKind};
 
 const SETTINGS_SUBTITLE_PREFIX: &str = "System Settings";
 const BROWSE_USAGE_LOG_SCALE: f64 = 60.0;

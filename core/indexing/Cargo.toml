@@ -1,5 +1,5 @@
 [package]
-name = "lumio-indexing"
+name = "zeidex-indexing"
 edition = "2024"
 rust-version.workspace = true
 license.workspace = true

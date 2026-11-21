@@ -1,61 +1,60 @@
 # Assets
 
-| File | What it is |
+| Path | What it is |
 | --- | --- |
-| `icon-source.png` | The original app icon artwork. Edit or replace this one. |
-| `icon.png` | 1024 px master icon, generated. Do not edit by hand. |
-| `generate-icons.py` | Builds `icon.png` and every size in `AppIcon.appiconset` from `icon-source.png`. |
-| `lumio-ui/` | UI screenshots. |
-| `docs/` | Architecture docs. |
+| `brand/zeidex-mark.svg` | The mark. Pure geometry, transparent background, validated for repository-safe rendering. |
+| `brand/zeidex-mark.png` | 512 px render of the mark, used by the Tauri icon generator. |
+| `brand/zeidex-hero.svg` | README banner master (1200 × 400). Text, mark, and the page card. |
+| `brand/zeidex-hero-static.png` | Static banner — the fallback for `prefers-reduced-motion` and slow connections. |
+| `brand/zeidex-hero-animated.gif` | Animated banner: drifting aurora, sweeping scan line, breathing nodes. |
+| `screenshots/` | Real UI captures, produced from the components (see below). |
+| `legacy-ui/` | Screenshots of the pre-Tauri macOS shell. Historical only. |
+| `docs/` | Architecture and build docs. |
+| `icon-source.png` | 1024 px master for the platform icon, rendered from the mark. |
+| `icon.png` | 512 px copy. |
+
+## Regenerating the banner
+
+Motion is a deterministic function of the frame index, so the GIF is reproducible:
+
+```bash
+python3 tools/render-hero.py
+```
+
+`rsvg-convert` rasterizes each frame, `ffmpeg` builds the palette, and `gifsicle`
+(optional) does the lossy pass. The script keeps the GIF around 400 KB; keep it under
+1 MB, or GitHub's image proxy starts to crawl.
+
+## Regenerating the screenshots
+
+The screenshots are not mockups. `app/src/demo/mock.ts` installs a fake Tauri IPC bridge
+in front of the real React tree, so the components, fonts, spacing and RTL behaviour are
+the shipping ones:
+
+```bash
+cd app && npm run dev            # then open http://localhost:5173/?demo=launcher
+```
+
+`?demo=ocr` starts in the Studio. To re-capture with Playwright, point a Chromium
+instance at `http://localhost:5173`, click through search, calculator, clipboard,
+translation and the OCR flow, and save `.panel` element screenshots into
+`screenshots/`.
 
 ## Updating the app icon
 
-1. Replace `assets/icon-source.png` with the new artwork (PNG, 1024 px or larger).
-   It can have a transparent background, or a solid one (black, white, any color);
-   a solid background is removed automatically.
-2. From the repo root, run:
+1. Edit `brand/zeidex-mark.svg`.
+2. Render `brand/zeidex-mark.png` at 512 px and copy it to `icon-source.png` (1024 px)
+   and `icon.png` (512 px):
 
    ```bash
-   make icons
+   rsvg-convert -w 1024 -h 1024 -o assets/icon-source.png assets/brand/zeidex-mark.svg
+   rsvg-convert -w 512  -h 512  -o assets/icon.png        assets/brand/zeidex-mark.svg
    ```
 
-3. Check `assets/icon.png`, then build the app (`make app-run`) to see it in the Dock.
-4. Commit `icon-source.png`, `icon.png` and the changed files in
-   `apps/macos/LauncherApp/lumio-app/Assets.xcassets/AppIcon.appiconset/`.
+3. Regenerate every platform icon:
 
-`make icons` uses `pipx`, which installs Pillow and numpy on the fly
-(`brew install pipx` if you do not have it). Without pipx it falls back to
-`python3`, which then needs `python3 -m pip install pillow numpy`.
+   ```bash
+   cd app && npx tauri icon ../assets/brand/zeidex-mark.png --output ../src-tauri/icons
+   ```
 
-## Running the script directly
-
-```bash
-pipx run assets/generate-icons.py                     # uses assets/icon-source.png
-pipx run assets/generate-icons.py ~/Desktop/new.png   # another source image
-make icons ICON=~/Desktop/new.png                     # same, through make
-pipx run assets/generate-icons.py --help              # all options
-```
-
-What it does:
-
-1. Removes a solid background color, read from the image border. Only background
-   touching the border is removed, so dark areas inside the icon stay.
-2. Smooths the edge so no dark fringe from the old background is left.
-3. Trims the empty margin and centers the shape on Apple's macOS icon grid
-   (824 px inside a 1024 px canvas), so the icon matches other apps in the Dock.
-4. Writes `assets/icon.png` and all 10 sizes (16 px to 1024 px) plus
-   `Contents.json` into `AppIcon.appiconset`.
-
-## Options
-
-| Option | Default | Use it when |
-| --- | --- | --- |
-| `--padding N` | `100` | The icon looks too small or too large. Margin per side on the 1024 px canvas; `0` fills the canvas. |
-| `--tolerance N` | `12` | Some background is left (raise it) or parts of the icon disappear (lower it). Range 0–255. |
-| `--inset N` | `1` | A thin dark or light outline remains around the icon (raise to `2` or `3`). |
-
-Example: a larger icon, with a background that has slight noise:
-
-```bash
-pipx run assets/generate-icons.py --padding 60 --tolerance 24
-```
+4. Commit the changed files under `src-tauri/icons/`.

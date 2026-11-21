@@ -1,5 +1,5 @@
 use crate::normalize::normalize_for_search;
-use lumio_indexing::CandidateKind;
+use zeidex_indexing::CandidateKind;
 
 // Query prefixes: leading letter matched case-insensitively, trailing `"`
 // exactly (see `strip_query_prefix`).
@@ -61,7 +61,7 @@ fn strip_query_prefix<'a>(input: &'a str, prefix: &[u8]) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::ParsedQuery;
-    use lumio_indexing::CandidateKind;
+    use zeidex_indexing::CandidateKind;
 
     #[test]
     fn folder_prefix_sets_filter() {

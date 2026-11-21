@@ -1,16 +1,16 @@
 [package]
-name = "lumio-perf-tools"
+name = "zeidex-perf-tools"
 edition = "2024"
 license = "GPL-3.0-or-later"
 authors = ["cavaldos"]
 version = "0.1.0"
 publish = false
-description = "Perf and stress benches for lumio's index refresh / watcher path. Not shipped in any app bundle."
+description = "Perf and stress benches for zeidex's index refresh / watcher path. Not shipped in any app bundle."
 
 [dependencies]
-lumio-engine = { path = "../../core/engine" }
-lumio-matching = { path = "../../core/matching" }
-lumio-storage = { path = "../../core/storage" }
+zeidex-engine = { path = "../../core/engine" }
+zeidex-matching = { path = "../../core/matching" }
+zeidex-storage = { path = "../../core/storage" }
 notify = "6"
 
 [[bin]]

@@ -1,0 +1,7 @@
+# Clippy configuration for the workspace.
+#
+# `unwrap_used` / `expect_used` are denied in production code (see the Makefile
+# `core-clippy` target). Tests legitimately use them for fixtures and
+# assertions, so they are allowed under `cfg(test)`.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

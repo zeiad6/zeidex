@@ -1,0 +1,53 @@
+Zeidex Studio
+Copyright (C) 2026 cavaldos <https://github.com/cavaldos>
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+
+Commercial use
+--------------
+The GNU GPLv3 does not restrict commercial use. You may use, modify, sell and
+distribute this software, including as part of a commercial product or a paid
+service, provided that the GPLv3 obligations are met: source code for the
+covered work is made available, the licence text and copyright notices are
+preserved, and derivative works are licensed under the GPLv3 as well.
+
+For a proprietary (closed-source) redistribution, a separate commercial licence
+is required. Contact the copyright holder.
+
+Upstream
+--------
+Zeidex Studio is a derivative of "look" by kunkka19xx, which is distributed
+under the GNU General Public License v3.0:
+
+    look — https://github.com/kunkka19xx/look
+    Copyright (C) kunkka19xx
+    Licensed under the GNU General Public License v3.0.
+
+The original macOS shell (SwiftUI + Apple Vision) is preserved, unmodified in
+substance, under `legacy/` for historical reference and is covered by the same
+licence.
+
+Third-party components
+----------------------
+- PP-OCRv4 detection/recognition models, PP-Structure layout model and SLANet
+  table-structure model — PaddleOCR (Apache License 2.0), downloaded by
+  `scripts/fetch_models.sh`. The models are not distributed from this
+  repository; the script fetches them at build time and verifies SHA-256 sums.
+- ONNX Runtime — MIT License.
+- Tauri, React, Tailwind CSS and the Rust crates in `Cargo.lock` — under their
+  respective licences, as listed in each package's metadata.
+
+Fonts
+-----
+- Inter, JetBrains Mono and Noto Kufi Arabic (SIL Open Font License 1.1),
+  bundled into the desktop UI so it renders identically offline.

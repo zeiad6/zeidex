@@ -2,11 +2,11 @@ use crate::config::RuntimeConfig;
 use crate::index::APP_CANDIDATE_ID_PREFIX;
 use crate::platform::macos;
 use crate::platform::paths::{candidate_id_path_component, path_is_same_or_child};
-use lumio_indexing::{Candidate, CandidateKind};
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::mpsc;
+use zeidex_indexing::{Candidate, CandidateKind};
 
 /// Used when a bundle path has no readable file stem, which should not happen
 /// for a real `.app` but keeps the candidate from having an empty title.
@@ -177,10 +177,10 @@ mod tests {
         should_exclude_app_name, should_exclude_path,
     };
     use crate::platform::macos::test_support::TempDir;
-    use lumio_indexing::Candidate;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
+    use zeidex_indexing::Candidate;
 
     fn create_app(root: &Path, name: &str) -> PathBuf {
         let app = root.join(name);

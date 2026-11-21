@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use lumio_indexing::{Candidate, CandidateKind};
+use zeidex_indexing::{Candidate, CandidateKind};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LaunchResult {

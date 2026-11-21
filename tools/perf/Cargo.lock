@@ -278,16 +278,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "616ec5685824bcc94416c6d4a7a446eea774a31efd7062c8480ba6fd06d7a6e5"
 
 [[package]]
-name = "lumio-engine"
+name = "zeidex-engine"
 version = "0.1.0"
 dependencies = [
  "globset",
  "ignore",
- "lumio-indexing",
- "lumio-matching",
- "lumio-ranking",
- "lumio-storage",
- "lumio-tools",
+ "zeidex-indexing",
+ "zeidex-matching",
+ "zeidex-ranking",
+ "zeidex-storage",
+ "zeidex-tools",
  "objc2",
  "objc2-foundation",
  "serde",
@@ -298,46 +298,46 @@ dependencies = [
 ]
 
 [[package]]
-name = "lumio-indexing"
+name = "zeidex-indexing"
 version = "0.1.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
-name = "lumio-matching"
+name = "zeidex-matching"
 version = "0.1.0"
 dependencies = [
  "unicode-normalization",
 ]
 
 [[package]]
-name = "lumio-perf-tools"
+name = "zeidex-perf-tools"
 version = "0.1.0"
 dependencies = [
- "lumio-engine",
- "lumio-matching",
- "lumio-storage",
+ "zeidex-engine",
+ "zeidex-matching",
+ "zeidex-storage",
  "notify",
 ]
 
 [[package]]
-name = "lumio-ranking"
+name = "zeidex-ranking"
 version = "0.1.0"
 dependencies = [
- "lumio-indexing",
+ "zeidex-indexing",
 ]
 
 [[package]]
-name = "lumio-storage"
+name = "zeidex-storage"
 version = "0.1.0"
 dependencies = [
- "lumio-indexing",
+ "zeidex-indexing",
  "rusqlite",
 ]
 
 [[package]]
-name = "lumio-tools"
+name = "zeidex-tools"
 version = "0.1.0"
 dependencies = [
  "serde",

@@ -1,0 +1,6 @@
+# Pinned so CI and local builds agree. The core crates declare
+# `rust-version = "1.88"`; edition 2024 needs a newer compiler than 1.88 in
+# practice, so this is the verified toolchain rather than the minimum.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

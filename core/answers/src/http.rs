@@ -12,7 +12,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-const USER_AGENT: &str = "Lumio-Launcher";
+const USER_AGENT: &str = "Zeidex-Launcher";
 /// Appended after the body so one stdout carries both; split on the last newline.
 const WRITE_OUT_STATUS: &str = "\n%{http_code}";
 const HTTP_OK: u16 = 200;

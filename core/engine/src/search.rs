@@ -5,11 +5,11 @@ use crate::scoring::{
     is_system_settings_candidate, kind_bias, looks_like_settings_query, path_depth_penalty,
     path_match_score, push_top_k, query_kind_penalty_with_settings_flag,
 };
-use lumio_indexing::{Candidate, CandidateKind};
-use lumio_matching::{fuzzy_quality_bonus_prepared, fuzzy_score_prepared, prepare_query};
-use lumio_ranking::rank_score;
 use std::collections::BinaryHeap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use zeidex_indexing::{Candidate, CandidateKind};
+use zeidex_matching::{fuzzy_quality_bonus_prepared, fuzzy_score_prepared, prepare_query};
+use zeidex_ranking::rank_score;
 
 const RERANK_POOL_MULTIPLIER: usize = 4;
 const RERANK_TOP_N: usize = 80;
