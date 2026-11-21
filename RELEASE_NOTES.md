@@ -45,6 +45,11 @@ installer.
 - Roughly **34 MB of models** and **32 MB of runtime libraries**, so the first run
   works on a machine that has never seen the internet.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/zeiad6/zeidex/main/assets/screenshots/launcher-search.png" alt="Launcher search results" width="47%">
+  <img src="https://raw.githubusercontent.com/zeiad6/zeidex/main/assets/screenshots/studio-document.png" alt="Document Studio" width="47%">
+</p>
+
 ---
 
 ## Downloads

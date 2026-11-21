@@ -1,0 +1,364 @@
+<p align="center">
+  <picture>
+    <source srcset="assets/brand/zeidex-hero-static.png" media="(prefers-reduced-motion: reduce)" />
+    <source srcset="assets/brand/zeidex-hero-animated.gif" type="image/gif" />
+    <img
+      src="assets/brand/zeidex-hero-static.png"
+      alt="Zeidex Studio — مشغّل تطبيقات وذكاء مستندات يعمل دون اتصال"
+      width="900"
+      height="300"
+    />
+  </picture>
+</p>
+
+<h1 align="center">Zeidex Studio</h1>
+
+<p align="center">
+  <strong>ابحث عن أي شيء، شغّل أي تطبيق، وحوّل الورق إلى مستندات قابلة للتحرير — دون أن يغادر جهازك.</strong>
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> · <b>العربية</b>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="الترخيص: GPL-3.0-or-later" width="148" height="20" src="https://img.shields.io/badge/licence-GPL--3.0--or--later-22d3ee?style=flat-square" /></a>
+  <img alt="الأنظمة: macOS وWindows وLinux" width="216" height="20" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-1f2733?style=flat-square" />
+  <img alt="Rust 1.99" width="83" height="20" src="https://img.shields.io/badge/rust-1.99-b7410e?style=flat-square&logo=rust" />
+  <img alt="Tauri 2" width="73" height="20" src="https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri" />
+  <img alt="React 19" width="81" height="20" src="https://img.shields.io/badge/React-19-0b7285?style=flat-square&logo=react" />
+  <img alt="بلا تتبّع" width="100" height="20" src="https://img.shields.io/badge/telemetry-none-2f855a?style=flat-square" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/zeiad6/zeidex/releases/latest"><b>نزّل أحدث إصدار</b></a><br>
+  <sub>Windows — <code>.msi</code> / <code>.exe</code> · Linux — <code>.deb</code> / <code>.AppImage</code></sub>
+</p>
+
+<p align="center">
+  <a href="#البدء-السريع">البدء السريع</a> ·
+  <a href="https://github.com/zeiad6/zeidex/releases">الإصدارات</a> ·
+  <a href="#ما-الذي-يفعله">ما الذي يفعله</a> ·
+  <a href="#استوديو-المستندات">استوديو المستندات</a> ·
+  <a href="#المعمارية">المعمارية</a> ·
+  <a href="#المساهمة">المساهمة</a>
+</p>
+
+---
+
+## باختصار
+
+**Zeidex Studio** تطبيق سطح مكتب يجمع شيئين في ملف تنفيذي واحد: مشغّل تطبيقات وملفات، واستوديو مستندات يعمل دون اتصال. اضغط <kbd>Alt</kbd>+<kbd>Space</kbd>، اكتب ثلاثة أحرف، واضغط <kbd>Enter</kbd>: يفتح تطبيق، أو يظهر مجلد، أو تُنسخ نتيجة حسابية إلى الحافظة. وأسقط صورة ممسوحة أو ملف PDF في الاستوديو لتحصل على **ملفات Word وExcel قابلة للتحرير** — مع التنسيق والجداول والخلايا المدمجة والنص العربي من اليمين إلى اليسار.
+
+لا شيء يُرفع إلى الإنترنت. لا حساب، ولا مزامنة، ولا تتبّع، ولا أي اتصال شبكي في مسار الفهرسة أو التعرّف الضوئي على الحروف (OCR). الميزة الوحيدة التي تتصل بالشبكة هي الترجمة، لأنها بطبيعتها تحتاج ذلك.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>كل شيء محلي</h3>
+      <p>البحث يعمل على فهرس SQLite لتطبيقاتك وملفاتك ومجلداتك. والتعرّف الضوئي يعمل على ONNX Runtime بنماذج تُحمَّل من القرص. افصل كابل الشبكة وسيظل التطبيق يعمل.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>تطبيق أصلي، لا تبويب متصفح</h3>
+      <p>واجهة Tauri حول نواة Rust: ملف تنفيذي أصلي واحد بدل حزمة Chromium كاملة، وقوائم وشريط نظام أصليان، واختصار عام يعمل حتى والنافذة مخفية.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>العربية مواطن أول</h3>
+      <p>تعرّف ضوئي، وإعادة ترتيب BiDi، وتخطيط من اليمين إلى اليسار، وتصدير Word/Excel يحترم الاتجاه. تنقلب الواجهة بنقرة واحدة باستخدام خصائص CSS المنطقية، فلا يختل موضع أي عنصر.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>مستندات، لا نصوص مبعثرة</h3>
+      <p>عناوين وقوائم وأشكال وجداول بخلايا مدمجة — كلها تُحفظ في <code>.docx</code> يُفتح كجدول حقيقي، و<code>.xlsx</code> بخلايا رقمية ونطاقات مدمجة.</p>
+    </td>
+  </tr>
+</table>
+
+## ما الذي يفعله
+
+### المشغّل
+
+حقل إدخال واحد وأربعة أوضاع. <kbd>Tab</kbd> يبدّل الفلتر، و<kbd>↑</kbd>/<kbd>↓</kbd> للتنقل، و<kbd>Enter</kbd> للتنفيذ، و<kbd>Esc</kbd> لإخفاء النافذة.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/launcher-search.png" alt="البحث في التطبيقات والملفات والمجلدات من المشغّل" /></td>
+    <td width="50%"><img src="assets/screenshots/launcher-arabic-search.png" alt="المشغّل نفسه بالعربية ومن اليمين إلى اليسار" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>بحث ضبابي في التطبيقات والملفات والمجلدات، مرتّب حسب جودة المطابقة <em>و</em> حسب طريقة استخدامك الفعلية.</sub></td>
+    <td align="center"><sub>دعم كامل للعربية: التبويبات والنتائج والأعداد والمستندات المصدَّرة.</sub></td>
+  </tr>
+</table>
+
+| | |
+| --- | --- |
+| **البحث** | مطابقة ضبابية تتجاهل التشكيل وحالة الأحرف، ومجموعات أسماء بديلة (`alias_code=Visual Studio Code\|Cursor\|Zed`)، وإعادة ترتيب تعتمد على الاستخدام حتى يفوز ما تفتحه كل صباح عند التعادل. |
+| **الآلة الحاسبة** | اكتب التعبير ويُحسب أثناء الكتابة. <kbd>Enter</kbd> ينسخ الرقم الخام القابل لإعادة التحليل — لا الصيغة المنسّقة `1,000,000`. |
+| **سجل الحافظة** | كل نص يُنسخ يُحفظ محلياً في SQLite، بلا تكرار، وقابل للبحث والتثبيت، ولا تنتهي صلاحيته إلا إذا طلبت ذلك. |
+| **الترجمة** | `tr"` ثم النص، ليترجم إلى العربية والإنجليزية والفرنسية والإسبانية. كل لغة تفشل باستقلال، فلا تعطّل طلباً واحداً محدود المعدل بقية اللوحة. |
+| **بحث الويب والروابط** | اكتب رابطاً لفتحه، أو عبارة للبحث عنها في متصفحك الافتراضي. |
+| **التفضيلات** | المحرر والطرفية المفضلان يُحدَّدان لكل نظام، فـ«افتح في المحرر» يعني المحرر الصحيح. |
+
+مرجع لوحة المفاتيح:
+
+| المفتاح | الإجراء |
+| --- | --- |
+| <kbd>Alt</kbd>+<kbd>Space</kbd> | إظهار أو إخفاء المشغّل (عام، يعمل والنافذة مخفية) |
+| <kbd>↑</kbd> <kbd>↓</kbd> | نقل التحديد |
+| <kbd>Enter</kbd> | تنفيذ النتيجة المحددة، أو نسخ نتيجة الحاسبة |
+| <kbd>Esc</kbd> | إخفاء النافذة |
+| <kbd>Tab</kbd> | تبديل الكل ← التطبيقات ← الملفات ← الحافظة |
+
+<table>
+  <tr>
+    <td width="33.3%"><img src="assets/screenshots/launcher-calculator.png" alt="نتيجة حاسبة داخل حقل البحث" /></td>
+    <td width="33.3%"><img src="assets/screenshots/launcher-clipboard.png" alt="سجل الحافظة مع التثبيت والحذف" /></td>
+    <td width="33.3%"><img src="assets/screenshots/launcher-translate.png" alt="ترجمة إلى أربع لغات" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>الحاسبة: <kbd>Enter</kbd> ينسخ القيمة الخام.</sub></td>
+    <td align="center"><sub>الحافظة: العناصر المثبّتة تنجو من التنظيف الدوري.</sub></td>
+    <td align="center"><sub>الترجمة: أربع لغات، كل واحدة تفشل باستقلال.</sub></td>
+  </tr>
+</table>
+
+### استوديو المستندات
+
+تدخل الصور وملفات PDF، تخرج صفحة منظّمة. كل صندوق قابل للتحرير، وكل جدول جدولٌ حقيقي، والتصدير مستند يمكنك متابعة العمل فيه.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/studio-document.png" alt="استوديو المستندات: معاينة الصفحة مع المناطق المكتشفة والنص القابل للتحرير" /></td>
+    <td width="50%"><img src="assets/screenshots/studio-table.png" alt="استوديو المستندات: منطقة جدول بخلايا قابلة للتحرير" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>مناطق التخطيط على اليمين، والنص القابل للتحرير على اليسار. انقر صندوقاً لتنتقل إلى محرّره.</sub></td>
+    <td align="center"><sub>SLANet يستعيد الشبكة، بما في ذلك امتدادات الصفوف والأعمدة، قبل التصدير.</sub></td>
+  </tr>
+</table>
+
+خط المعالجة، كله على جهازك:
+
+```text
+صورة / صفحة PDF
+   │
+   ├─▶ التخطيط       PicoDet (PP-StructureV2، خمس فئات)  ──▶ عنوان · نص · قائمة · جدول · شكل
+   │
+   ├─▶ أسطر النص     DBNet (PP-OCRv4 det)  ──▶ صناديق مُعاد تحجيمها دون قصّ
+   │        └─▶ التعرّف  PP-OCRv4 (قاموسا الإنجليزية والعربية)
+   │                 └─▶ إعادة ترتيب BiDi للعربية  ──▶ نص بالترتيب المنطقي
+   │
+   └─▶ الجداول       مفكّك تسلسل SLANet  ──▶ شبكة وامتدادات ونص كل خلية
+                              │
+                              ▼
+                    نموذج صفحة قابل للتحرير
+                              │
+                   ┌──────────┴──────────┐
+                   ▼                     ▼
+              .docx (bidi للعربية،    .xlsx (ورقة RTL،
+              جداول أصلية،            خلايا رقمية،
+              خلايا مدمجة)            نطاقات مدمجة)
+```
+
+لماذا تهم هذه التفاصيل:
+
+- **صناديق الكشف تُوسَّع ولا تُقصّ.** قناع الاحتمال في DBNet يغطي الشريط الأوسط من السطر فقط. قصّه كما هو يقطع امتدادات الحروف العربية والتشكيل، لذلك تُوسَّع الصناديق بنسبة `unclip` في PaddleOCR بعد تطبيق معامل التحجيم.
+- **الجداول تُفكّك، لا تُخمَّن.** يُخرج SLANet رموزاً بنيوية (`<thead>` و`<tr>` و`<tbody>` و`colspan` و`rowspan`)، ويبني المحرر الشبكة منها، فما تراه هو ما يكتبه المصدّر.
+- **العربية تُخزَّن بالترتيب المنطقي.** الواجهة تُشكّلها للعرض، والمصدّرات تكتب الترتيب المنطقي مع ضبط `bidi` على الفقرة والورقة، وهو ما يتوقعه Word وExcel.
+- **ملفات PDF تُحوَّل محلياً** باستخدام pdfium — بلا ghostscript وبلا محوّل سحابي.
+
+### الخصوصية
+
+| | |
+| --- | --- |
+| اتصالات الشبكة في البحث والفهرسة والتعرّف الضوئي والتصدير | **لا شيء** |
+| اتصالات الشبكة في الترجمة | نقطة نهاية Google `gtx`، فقط عند استخدام `tr"` |
+| التتبّع وتقارير الأعطال والتحليلات | **لا شيء** |
+| الملفات المقروءة | فقط ما تفهرسه أو تفتحه |
+| تنزيل النماذج | مرة واحدة عبر `scripts/fetch_models.sh` مع التحقق من البصمات |
+
+قاعدة البيانات — فهرس البحث وسجل الحافظة وسجل الاستخدام — تعيش في مجلد بيانات نظامك: `~/.local/share/zeidex` على Linux، و`~/Library/Application Support/zeidex` على macOS، و`%APPDATA%\zeidex` على Windows. احذف ذلك المجلد وينسى التطبيق كل شيء. وملف الإعدادات هو `~/.zeidex/config` على كل الأنظمة.
+
+## البدء السريع
+
+### البناء من المصدر
+
+المتطلبات: Rust (مثبّت في `rust-toolchain.toml`)، وNode 20 أو أحدث، و[متطلبات Tauri](https://v2.tauri.app/start/prerequisites/) المعتادة لنظامك.
+
+```bash
+git clone https://github.com/zeiad6/zeidex.git
+cd zeidex
+
+# 1. نماذج OCR، مرة واحدة (≈ 35 ميغابايت، مع التحقق من البصمات)
+make models
+
+# 2. مكتبات التشغيل: ONNX Runtime وpdfium
+#    ضع libonnxruntime.{so,dylib,dll} وlibpdfium.{so,dylib,dll}
+#    في src-tauri/resources/lib/ ليشملها الحزمة، أو ثبّتهما
+#    على مستوى النظام واضبط ORT_DYLIB_PATH / ZEIDEX_PDFIUM_LIBRARY.
+
+# 3. شغّله
+make frontend-install
+make tauri-dev            # للتطوير
+make tauri-build          # حزم الإصدار لنظامك الحالي
+```
+
+ينتج `make tauri-build` ملفات `.deb` و`.appimage` على Linux، و`.msi` و`.nsis` على Windows، و`.dmg` على macOS. لا شيء يُرفع تلقائياً: دفع وسم `v*` يشغّل `.github/workflows/release.yml`، الذي يبني على منصّات أصلية ويرفق الحزم بمسودة إصدار. يُبنى MSI على Windows لأن WiX لا يعمل على Linux. سير العمل يضع ONNX Runtime وpdfium داخل الحزمة؛ والبناء المحلي يستخدم ما هو موجود في `src-tauri/resources/lib/` (انظر [البناء والإصدار](assets/docs/build-and-release.md)).
+
+### التحقق من البناء
+
+```bash
+make core-test     # مساحة عمل Rust كاملة
+make core-fmt      # التنسيق
+make core-clippy   # clippy، مع منع unwrap/expect في مسارات الإنتاج
+make frontend-build
+make ocr-test      # نماذج حقيقية وصفحة حقيقية — يحتاج ORT_DYLIB_PATH
+```
+
+## الاستخدام
+
+| ماذا | كيف |
+| --- | --- |
+| البحث | <kbd>Alt</kbd>+<kbd>Space</kbd>، اكتب، ثم <kbd>Enter</kbd> |
+| الحساب | اكتب التعبير؛ يظهر صف النتيجة فوق النتائج |
+| الترجمة | `tr"` + النص |
+| سجل الحافظة | <kbd>Tab</kbd> حتى فلتر الحافظة |
+| بحث الويب | اكتب عبارة واختر نتيجة الويب، أو اكتب رابطاً لفتحه |
+| المستندات | **OCR Studio** في الأعلى ← **Open file** ← **Run OCR** |
+
+الإعدادات في `~/.zeidex/config`:
+
+```ini
+# الأدوات المفضلة، تستخدمها إجراءات "افتح في…"
+editor=nvim
+terminal=alacritty
+
+# عامل هذه التطبيقات كتطبيق واحد عند البحث
+alias_code=Visual Studio Code|Cursor|Zed
+```
+
+## المعمارية
+
+```mermaid
+flowchart TB
+  subgraph UI["واجهة سطح المكتب — Tauri 2"]
+    React["React 19 + Tailwind 4<br/>المشغّل · الاستوديو · RTL"]
+  end
+
+  subgraph Core["نواة Rust — مساحة عمل Cargo"]
+    Engine["zeidex-engine<br/>الاكتشاف · الاستعلام · الترتيب"]
+    Indexing["zeidex-indexing<br/>المرشّحون"]
+    Matching["zeidex-matching<br/>التطبيع · الضبابية"]
+    Ranking["zeidex-ranking<br/>إعادة ترتيب حسب الاستخدام"]
+    Storage["zeidex-storage<br/>SQLite"]
+    Answers["zeidex-answers<br/>الروابط · الترجمة"]
+    OCR["zeidex-ocr<br/>التخطيط · الكشف · التعرّف · الجداول · bidi · pdf"]
+    Export["zeidex-exporter<br/>docx · xlsx"]
+  end
+
+  SQLite[("SQLite<br/>الفهرس · الحافظة · الاستخدام")]
+  ONNX["ONNX Runtime<br/>PP-OCRv4 · PP-Structure · SLANet"]
+  PDFium["pdfium<br/>تحويل PDF إلى صورة"]
+
+  React -->|"أوامر IPC"| Engine
+  React -->|"أوامر IPC"| OCR
+  React -->|"أوامر IPC"| Export
+  Engine --> Indexing
+  Engine --> Matching
+  Engine --> Ranking
+  Engine --> Storage
+  Engine --> Answers
+  Storage --> SQLite
+  OCR --> ONNX
+  OCR --> PDFium
+```
+
+تُبنى مساحة عمل Rust وتُختبر **دون** Tauri أو Node أو webview، ولهذا يمكن اختبار منطق التعرّف الضوئي والتصدير في CI على نظامي تشغيل.
+
+| الحزمة | المسؤولية |
+| --- | --- |
+| `zeidex-engine` | الاكتشاف وتحليل الاستعلام والبحث وكشف المنصّة |
+| `zeidex-indexing` | نوع `Candidate` ونظام معرّفاته |
+| `zeidex-matching` | تطبيع الاستعلام والتنقيط الضبابي |
+| `zeidex-ranking` | الدرجة الأساسية معدّلة بمطابقة البداية والاستخدام السابق |
+| `zeidex-storage` | SQLite: المرشّحون وأحداث الاستخدام والحافظة وسجل الروابط والإعدادات |
+| `zeidex-tools` | تحديد المحرر والطرفية المفضلين لكل منصّة |
+| `zeidex-answers` | تصنيف الروابط؛ والترجمة خلف راية ميزة |
+| `zeidex-ocr` | خط ذكاء المستندات دون اتصال |
+| `zeidex-exporter` | كاتبا `.docx` و`.xlsx` |
+
+## الحدود، بصراحة
+
+- **المعرّف العربي هو الحلقة الأضعف.** يتعامل `arabic_PP-OCRv4_rec` مع العربية المشكّلة والمرتّبة منطقياً، لكنه يُسقط حروفاً في الأسطر الكثيفة جداً ولا يقرأ الأرقام العربية الهندية. تُنجح عمليات مسح العربية المطبوعة النظيفة؛ ولا تنجح الكتابة اليدوية والخطوط الزخرفية وصور الهاتف منخفضة الدقة. ترقية المعرّف هي البند الأول أدناه.
+- **الجداول تحتاج خطوطاً ظاهرة.** يستنتج SLANet الشبكة من رموز البنية؛ الجداول بلا حدود قد تفقد صفاً أو عموداً. الخلايا قابلة للتحرير، فالتقسيم الخاطئ قابل للإصلاح لا قاتل.
+- **التعرّف الضوئي محدود بالمعالج.** تستغرق صفحة A4 بدقة 300 نقطة بضع ثوانٍ على حاسوب محمول، ودقائق لملف PDF من 40 صفحة. يحدّ الكشف الطول الأكبر عند 1600 بكسل افتراضياً (`OcrEngineConfig::det_max_side`) ليبقى استهلاك الذاكرة محدوداً في المستندات الطويلة.
+- **مكتبات التشغيل غير مرفوعة في المستودع.** يُحمَّل ONNX Runtime وpdfium ديناميكياً؛ حزم الإصدار تضعهما، بينما يحتاجهما البناء من المصدر في `src-tauri/resources/lib/` أو في مسار تحميل النظام.
+- **النماذج تُنزَّل ولا تُرفع أبداً.** يسحب `scripts/fetch_models.sh` تسعة ملفات من مرايا Hugging Face ويتحقق منها مقابل `third_party/models/SHA256SUMS`.
+
+## خارطة الطريق
+
+- [x] واجهة Tauri متعددة المنصّات بدل تطبيق SwiftUI الخاص بـ macOS
+- [x] تعرّف ضوئي دون اتصال: التخطيط وأسطر النص والجداول وBiDi للعربية
+- [x] مناطق وجداول قابلة للتحرير في الاستوديو
+- [x] تصدير `.docx` و`.xlsx` مع دعم RTL
+- [x] واجهة عربية كاملة من اليمين إلى اليسار
+- [ ] معرّف عربي أفضل (الأسطر الكثيفة، الأرقام العربية الهندية) — تقييم
+      [`arabic_PP-OCRv5_mobile_rec_onnx`](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx)
+      (8 ميغابايت، نفس مفكّك CTC بإدخال 48 بكسل)
+- [ ] معالجة الكتابة اليدوية والصور منخفضة الجودة
+- [ ] اختيار نطاق الصفحات عند تصدير PDF
+- [ ] حزم تثبيت موقّعة لـ macOS وWindows وLinux
+- [ ] واجهة إضافات لمزوّدي نتائج مخصّصين
+
+## الوثائق
+
+- [المعمارية](assets/docs/architecture.md) — كيف تتكامل الواجهة والنواة والواجهة الأمامية
+- [نواة Rust](assets/docs/core.md) — الحزم وخط البحث وداخليات التعرّف الضوئي
+- [استوديو OCR](assets/docs/ocr-studio.md) — منصة عمل المستندات، لوحة بلوحة
+- [البناء والإصدار](assets/docs/build-and-release.md) — المتطلبات والأهداف والفحوص والحزم
+
+## المساهمة
+
+تقارير الأخطاء وطلبات السحب مرحّب بها. اقرأ [CONTRIBUTING.md](CONTRIBUTING.md) أولاً — فهو يشرح أسلوب الالتزامات وبوابات الاختبار وقواعد clippy (مسارات الإنتاج تمنع `unwrap()` و`expect()`). للبدء سريعاً:
+
+```bash
+make core-test && make core-fmt && make core-clippy && make frontend-build
+```
+
+## المطوّر
+
+<table>
+  <tr>
+    <td width="96" align="center">
+      <img src="assets/brand/zeidex-mark.svg" width="72" height="72" alt="Zeidexsoft">
+    </td>
+    <td>
+      <b>Zeidexsoft</b> — تطبيقات محلية سريعة تحترم خصوصيتك.<br>
+      المشرف: <a href="https://github.com/zeiad6">@zeiad6</a> · الموقع: <a href="https://zeidexsoft.com">zeidexsoft.com</a> · بطاقة المطوّر: <a href="https://zeidexlink.zeidexsoft.com/zeidex">zeidexlink.zeidexsoft.com/zeidex</a>
+    </td>
+  </tr>
+</table>
+
+للدعم والاقتراحات: افتح [مسألة](https://github.com/zeiad6/zeidex/issues) أو تواصل مع المطوّر عبر [بطاقة المطوّر](https://zeidexlink.zeidexsoft.com/zeidex).
+
+## الترخيص والإسناد
+
+**Zeidex Studio** برنامج حرّ تحت **رخصة GNU العامة الإصدار 3.0 أو أحدث**. يمكنك استخدامه شخصياً وفي العمل ولأغراض تجارية؛ وإذا وزّعته أو وزّعت نسخة معدّلة، يجب أن يبقى المصدر متاحاً تحت الرخصة نفسها وأن تُحفظ إشعارات حقوق النشر. إن احتجت تضمينه في منتج مغلق المصدر، تواصل مع صاحب حقوق النشر لمناقشة ترخيص تجاري منفصل.
+
+حقوق النشر © 2026 Zeidexsoft.
+
+هذا المشروع مشتق من [`kunkka19xx/look`](https://github.com/kunkka19xx/look) (GPL-3.0). وواجهة macOS الأصلية محفوظة تحت `legacy/` للرجوع. إسنادات النماذج والمكتبات مذكورة في [NOTICE](NOTICE).
+
+<p align="center">
+  <a href="https://star-history.com/#zeiad6/zeidex&Date">
+    <img src="https://api.star-history.com/svg?repos=zeiad6/zeidex&type=Date" alt="تاريخ النجوم" width="640" />
+  </a>
+</p>
+
+<p align="center">
+  <sub>مبني بـ Rust وTauri وReact وONNX Runtime. بلا سحابة، بلا حساب، بلا تتبّع.</sub>
+</p>
+
+

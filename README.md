@@ -18,6 +18,10 @@
 </p>
 
 <p align="center">
+  <b>English</b> · <a href="README.ar.md">العربية</a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img alt="Licence: GPL-3.0-or-later" width="148" height="20" src="https://img.shields.io/badge/licence-GPL--3.0--or--later-22d3ee?style=flat-square" /></a>
   <img alt="Platforms: macOS, Windows, Linux" width="216" height="20" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-1f2733?style=flat-square" />
   <img alt="Rust 1.99" width="83" height="20" src="https://img.shields.io/badge/rust-1.99-b7410e?style=flat-square&logo=rust" />
@@ -27,7 +31,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/zeiad6/zeidex/releases/latest"><b>Download the latest release</b></a><br>
+  <sub>Windows — <code>.msi</code> / <code>.exe</code> · Linux — <code>.deb</code> / <code>.AppImage</code></sub>
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/zeiad6/zeidex/releases">Releases</a> ·
   <a href="#what-it-does">What it does</a> ·
   <a href="#document-studio">Document Studio</a> ·
   <a href="#architecture">Architecture</a> ·
