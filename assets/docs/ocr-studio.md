@@ -17,6 +17,13 @@ bounded chunk at a time, so a long document does not hold every bitmap in
 memory. Detection and recognition for a chunk run in parallel on rayon; the
 Studio follows along through `ocr-progress` events.
 
+For a long PDF, the two boxes beside **Run OCR** take a 1-based, inclusive page
+window; both empty means every page. A window validates against the real page
+count before rendering — a first page past the end is an error, a last page past
+the end is clamped — and `PageResult::page_index` keeps the document's own page
+number, so the preview and the page selector show page 5 of the file even when
+only pages 5–7 were read. Progress counts the selected pages.
+
 ## The two panes
 
 **Left — the page.** `ocr_page_preview` renders the page to a PNG data URL, so
@@ -57,10 +64,11 @@ The pipeline (`core/ocr_engine`) runs:
 | Target | What it keeps |
 | --- | --- |
 | `.docx` | Real Word document; `w:bidi` on Arabic paragraphs **and table cells**, native tables with merges, bold titles, a page break between pages |
-| `.xlsx` | Real spreadsheet; one worksheet per page, RTL sheet view, merged cells, numeric cells kept as numbers, tables stacked with a row cursor instead of overwriting each other |
+| `.xlsx` | Real spreadsheet; one worksheet per page, named with the document's page number, RTL sheet view, merged cells, numeric cells kept as numbers, tables stacked with a row cursor instead of overwriting each other |
 
 Export writes **all pages** currently loaded (`export_docx_pages` /
-`export_xlsx_pages`), not only the active one. The `PageResult`s travel to Rust
+`export_xlsx_pages`), not only the active one — which, after a page window, is
+the window rather than the whole document. The `PageResult`s travel to Rust
 as JSON, so what you edited is what gets written.
 
 ## Models

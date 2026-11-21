@@ -23,17 +23,21 @@ pub fn export_xlsx_pages(pages: &[PageResult], path: impl AsRef<Path>) -> Export
     if pages.is_empty() {
         workbook.add_worksheet();
     }
-    for (index, page) in pages.iter().enumerate() {
-        write_page(&mut workbook, page, index)?;
+    for page in pages {
+        write_page(&mut workbook, page)?;
     }
     workbook.save(path)?;
     Ok(())
 }
 
 /// Writes one page's regions into a fresh worksheet.
-fn write_page(workbook: &mut Workbook, page: &PageResult, index: usize) -> ExportResult<()> {
+///
+/// The sheet is named after the document's page index, not its position in the
+/// slice: after a page-window run, the first loaded page may be page 5 of the
+/// file and a sheet called "Page 1" would be wrong.
+fn write_page(workbook: &mut Workbook, page: &PageResult) -> ExportResult<()> {
     let worksheet = workbook.add_worksheet();
-    worksheet.set_name(format!("Page {}", index + 1))?;
+    worksheet.set_name(format!("Page {}", page.page_index + 1))?;
     worksheet.set_right_to_left(is_rtl_page(page));
 
     // Row cursor for this sheet. Tables are stacked with a blank separator row so

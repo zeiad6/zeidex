@@ -18,6 +18,8 @@
   "files": [
     "src/index-status.ts",
     "src/index-status.test.ts",
+    "src/page-range.ts",
+    "src/page-range.test.ts",
     "src/settings-draft.ts",
     "src/settings-draft.test.ts",
     "src/window-size.ts",

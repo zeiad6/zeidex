@@ -19,6 +19,7 @@ import {
   updateCellText,
   updateRegionText,
 } from "./ocr/edits";
+import { parsePageRange } from "../page-range";
 
 type Status =
   | { kind: "idle" }
@@ -43,6 +44,10 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
   const [showBoxes, setShowBoxes] = useState(true);
   const [editMode, setEditMode] = useState<EditMode>("regions");
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  // Empty means every page. Kept as text so a partially typed number is not
+  // coerced to 0 while the user is still deciding.
+  const [firstPage, setFirstPage] = useState("");
+  const [lastPage, setLastPage] = useState("");
   // While the plain-text editor is open its value is local: splitting on every
   // keystroke would collapse the newlines the user is still typing.
   const [draft, setDraft] = useState<string | null>(null);
@@ -50,6 +55,10 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
   const previewCache = useRef(new Map<string, PagePreview>());
 
   const page = pages[activePage];
+  const isPdf = filePath?.toLowerCase().endsWith(".pdf") ?? false;
+  // `page_index` is the document's own index, which differs from the position
+  // in `pages` after a page-window run.
+  const previewPage = page?.page_index ?? activePage;
 
   // Commit a pending plain-text edit into the region structure the exporters read.
   const commitDraft = useCallback(() => {
@@ -109,7 +118,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
       setPreview(null);
       return;
     }
-    const key = `${filePath}#${activePage}`;
+    const key = `${filePath}#${previewPage}`;
     const cached = previewCache.current.get(key);
     if (cached) {
       setPreview(cached);
@@ -118,7 +127,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     let active = true;
     setPreview(null);
     api
-      .ocrPagePreview(filePath, activePage)
+      .ocrPagePreview(filePath, previewPage)
       .then((result) => {
         previewCache.current.set(key, result);
         if (active) setPreview(result);
@@ -129,7 +138,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     return () => {
       active = false;
     };
-  }, [filePath, activePage, pages.length]);
+  }, [filePath, activePage, pages.length, previewPage]);
 
   const pickFile = async () => {
     try {
@@ -146,6 +155,8 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
       setActiveRegion(null);
       setDraft(null);
       setProgress(null);
+      setFirstPage("");
+      setLastPage("");
     } catch {
       // Dialog cancelled or unavailable.
     }
@@ -153,14 +164,21 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
 
   const runOcr = async () => {
     if (!filePath) return;
+    const range = parsePageRange(firstPage, lastPage);
+    if (range.kind === "invalid") {
+      setStatus({ kind: "error", message: range.message });
+      return;
+    }
     setStatus({ kind: "working", message: rtl ? "يعمل…" : "Starting…" });
     setActiveRegion(null);
     setDraft(null);
     setProgress(null);
     try {
-      const results = filePath.toLowerCase().endsWith(".pdf")
-        ? await api.ocrProcessPdf(filePath)
-        : [await api.ocrProcessImage(filePath)];
+      const results = !isPdf
+        ? [await api.ocrProcessImage(filePath)]
+        : range.kind === "range"
+          ? await api.ocrProcessPdfRange(filePath, range.first, range.last)
+          : await api.ocrProcessPdf(filePath);
       previewCache.current.clear();
       setPages(results);
       setActivePage(0);
@@ -258,6 +276,41 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
           </span>
 
           <span className="ms-auto flex items-center gap-1.5">
+            {isPdf && (
+              <span
+                className="flex items-center gap-1 text-[0.62rem] text-zinc-500"
+                title={
+                  rtl
+                    ? "اتركهما فارغين لقراءة كل الصفحات."
+                    : "Leave both empty to read every page."
+                }
+              >
+                <label htmlFor="ocr-first-page">{rtl ? "من" : "from"}</label>
+                <input
+                  id="ocr-first-page"
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  value={firstPage}
+                  onChange={(event) => setFirstPage(event.target.value)}
+                  disabled={working}
+                  aria-label={rtl ? "أول صفحة" : "First page"}
+                  className="w-12 rounded-md border border-white/10 bg-ink-850 px-1.5 py-1 text-center font-mono text-[0.66rem] text-zinc-200 outline-none transition focus:border-accent-400/50 disabled:opacity-40"
+                />
+                <label htmlFor="ocr-last-page">{rtl ? "إلى" : "to"}</label>
+                <input
+                  id="ocr-last-page"
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  value={lastPage}
+                  onChange={(event) => setLastPage(event.target.value)}
+                  disabled={working}
+                  aria-label={rtl ? "آخر صفحة" : "Last page"}
+                  className="w-12 rounded-md border border-white/10 bg-ink-850 px-1.5 py-1 text-center font-mono text-[0.66rem] text-zinc-200 outline-none transition focus:border-accent-400/50 disabled:opacity-40"
+                />
+              </span>
+            )}
             <button
               type="button"
               onClick={pickFile}
@@ -314,7 +367,8 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
               </h2>
               {pages.length > 0 && (
                 <span className="rounded-md border border-white/10 px-1.5 py-px font-mono text-[0.6rem] text-zinc-500">
-                  {activePage + 1}/{pages.length}
+                  {previewPage + 1}
+                  {pages.length > 1 && pages[0]?.page_index === 0 ? `/${pages.length}` : ""}
                 </span>
               )}
               <span className="ms-auto flex items-center gap-3">
@@ -341,7 +395,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                   >
                     {pages.map((candidate, index) => (
                       <option key={candidate.page_index} value={index}>
-                        {rtl ? `صفحة ${index + 1}` : `Page ${index + 1}`}
+                        {rtl ? `صفحة ${candidate.page_index + 1}` : `Page ${candidate.page_index + 1}`}
                       </option>
                     ))}
                   </select>

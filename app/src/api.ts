@@ -197,6 +197,8 @@ export const api = {
     invoke<PagePreview>("ocr_page_preview", { path, page, maxSide }),
   ocrProcessImage: (path: string) => invoke<PageResult>("ocr_process_image", { path }),
   ocrProcessPdf: (path: string) => invoke<PageResult[]>("ocr_process_pdf", { path }),
+  ocrProcessPdfRange: (path: string, firstPage: number, lastPage: number) =>
+    invoke<PageResult[]>("ocr_process_pdf_range", { path, firstPage, lastPage }),
   exportDocx: (page: PageResult, path: string) =>
     invoke<void>("export_docx", { page, path }),
   exportDocxPages: (pages: PageResult[], path: string) =>

@@ -48,6 +48,8 @@ image/PDF page ─▶ layout (PicoDet) ─▶ per-region: text lines (DBNet)
 Modules: `onnx.rs` (sessions, model paths, detection/recognition), `layout.rs`,
 `table.rs`, `pico.rs` (PicoDet decode), `bidi.rs`, `dict.rs` (character
 dictionaries), `geometry.rs`, `pdf.rs`, `pipeline.rs` (the `OcrEngine`).
+`OcrEngine::process_pdf` reads every page; `process_pdf_range` reads a validated
+1-based inclusive window and keeps each page's document index.
 
 Two details are load-bearing:
 

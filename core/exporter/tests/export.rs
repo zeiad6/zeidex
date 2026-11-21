@@ -298,12 +298,20 @@ fn docx_export_pages_keeps_every_page_and_breaks_between_them() {
 fn xlsx_export_pages_writes_one_sheet_per_page() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("pages.xlsx");
-    let pages = [page_with(0, "first page"), page_with(1, "second page")];
+    // A page window keeps the document's own indices: sheets must be named for
+    // the real pages, not their position in this slice.
+    let pages = [page_with(4, "first page"), page_with(5, "second page")];
     xlsx::export_xlsx_pages(&pages, &path).expect("export xlsx pages");
 
     let workbook = zip_entry(&path, "xl/workbook.xml");
-    assert!(workbook.contains("Page 1"), "missing sheet 1: {workbook}");
-    assert!(workbook.contains("Page 2"), "missing sheet 2: {workbook}");
+    assert!(
+        workbook.contains("Page 5"),
+        "missing sheet for page 5: {workbook}"
+    );
+    assert!(
+        workbook.contains("Page 6"),
+        "missing sheet for page 6: {workbook}"
+    );
 
     let sheet1 = "xl/worksheets/sheet1.xml";
     let sheet2 = "xl/worksheets/sheet2.xml";

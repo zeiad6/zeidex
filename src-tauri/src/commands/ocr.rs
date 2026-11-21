@@ -117,12 +117,34 @@ pub async fn ocr_process_pdf(
     window: Window,
 ) -> Result<Vec<PageResult>, String> {
     let engine = state.ocr_engine().map_err(|err| err.to_string())?;
-    let path = path.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let progress = |event: PipelineProgress| {
             let _ = window.emit("ocr-progress", event);
         };
         engine.process_pdf(Path::new(&path), &progress)
+    })
+    .await
+    .map_err(|err| err.to_string())?;
+    result.map_err(|err| err.to_string())
+}
+
+/// Processes a 1-based, inclusive page window of a PDF, emitting the same
+/// `ocr-progress` events as a full run. The Studio uses this to keep a long
+/// scan bounded to the pages the user actually needs.
+#[tauri::command]
+pub async fn ocr_process_pdf_range(
+    state: State<'_, AppState>,
+    path: String,
+    first_page: usize,
+    last_page: usize,
+    window: Window,
+) -> Result<Vec<PageResult>, String> {
+    let engine = state.ocr_engine().map_err(|err| err.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let progress = |event: PipelineProgress| {
+            let _ = window.emit("ocr-progress", event);
+        };
+        engine.process_pdf_range(Path::new(&path), first_page, last_page, &progress)
     })
     .await
     .map_err(|err| err.to_string())?;

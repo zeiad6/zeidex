@@ -351,7 +351,8 @@ why the OCR and export logic can be tested in CI on two operating systems.
   tables can lose a row or column. The cells are editable, so a wrong split is fixable,
   not fatal.
 - **OCR is CPU-bound.** A 300 dpi A4 page takes several seconds on a laptop and minutes
-  for a 40-page PDF. Detection caps the long side at 2400 px by default
+  for a 40-page PDF, so the Studio can read an inclusive page window instead of the
+  whole file. Detection caps the long side at 2400 px by default
   (`OcrEngineConfig::det_max_side`) so memory stays bounded on long documents while
   small table digits survive the downscale.
 - **Runtime libraries are not committed.** ONNX Runtime and pdfium are loaded
@@ -385,7 +386,7 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - [ ] Adopt a new Arabic recognizer once a labelled corpus of real Arabic scans
       confirms the gain
 - [ ] Handwriting and low-quality photo handling
-- [ ] Page-range selection when exporting a PDF
+- [x] Page-range selection when reading a PDF
 - [ ] Signed installers for macOS, Windows and Linux
 - [ ] Plugin API for custom result providers
 

@@ -34,7 +34,7 @@ installer.
 | **Launch anything** | Fuzzy search across installed applications, files and folders, with keyboard-first navigation and a compact, always-ready window. The index updates itself while the app runs — new, renamed and deleted files appear without a manual rebuild. |
 | **Clipboard history** | Searchable clipboard buffer with pinning, so the snippet you copied an hour ago is still one keystroke away. |
 | **Inline answers** | Calculator, unit and currency-style expressions, and translation right in the search field — no browser tab required. |
-| **Document Studio** | Drop a scan or a PDF, detect the layout, read the text with PP-OCRv4, edit the result, then export to Word or Excel. |
+| **Document Studio** | Drop a scan or a PDF, detect the layout, read the text with PP-OCRv4 (a long PDF can be read as a page window), edit the result, then export to Word or Excel. |
 | **Real Office files** | `.docx` with RTL `bidi` runs and native tables (including merged cells); `.xlsx` with a right-to-left sheet, numeric cells and merged ranges. |
 | **Private by construction** | ONNX inference runs on your CPU, locally. Nothing is uploaded, and there is no analytics endpoint to disable. |
 

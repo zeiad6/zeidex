@@ -102,6 +102,7 @@ pub fn run() -> anyhow::Result<()> {
             commands::ocr::ocr_page_preview,
             commands::ocr::ocr_process_image,
             commands::ocr::ocr_process_pdf,
+            commands::ocr::ocr_process_pdf_range,
             commands::ocr::export_docx,
             commands::ocr::export_docx_pages,
             commands::ocr::export_xlsx,

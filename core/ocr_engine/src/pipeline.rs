@@ -63,6 +63,38 @@ pub enum PipelineProgress {
     Finished,
 }
 
+/// Resolves a requested 1-based inclusive page window into a 0-based range.
+///
+/// Validation happens before any render so a caller gets one clear error
+/// instead of a partial success. A first page past the end is a mistake worth
+/// reporting; a last page past the end is clamped, because asking for "pages 1
+/// to 999" of a ten-page file is a reasonable thing to do.
+fn pdf_page_window(
+    total: usize,
+    range: Option<(usize, usize)>,
+) -> OcrResult<std::ops::Range<usize>> {
+    let Some((first, last)) = range else {
+        return Ok(0..total);
+    };
+    if first == 0 || last == 0 {
+        return Err(OcrError::Pdf("page numbers start at 1".to_string()));
+    }
+    if last < first {
+        return Err(OcrError::Pdf(format!(
+            "invalid page range: last page {last} is before first page {first}"
+        )));
+    }
+    if total == 0 {
+        return Err(OcrError::Pdf("the document has no pages".to_string()));
+    }
+    if first > total {
+        return Err(OcrError::Pdf(format!(
+            "page {first} is past the end of the document ({total} pages)"
+        )));
+    }
+    Ok(first - 1..last.min(total))
+}
+
 /// A rasterized page preview for the Studio's side-by-side view.
 pub struct PreviewImage {
     pub png: Vec<u8>,
@@ -138,6 +170,31 @@ impl OcrEngine {
         path: &Path,
         progress: &(dyn Fn(PipelineProgress) + Sync),
     ) -> OcrResult<Vec<PageResult>> {
+        self.process_pdf_window(path, None, progress)
+    }
+
+    /// Renders pages `first..=last` (1-based) and OCRs only those pages.
+    ///
+    /// The Studio uses this for a long document: a 200-page scan rarely needs
+    /// every page, and a range keeps the memory and time proportional to what
+    /// the user asked for. `PageResult::page_index` stays the document's own
+    /// index, so a page keeps its identity after a partial run.
+    pub fn process_pdf_range(
+        &self,
+        path: &Path,
+        first: usize,
+        last: usize,
+        progress: &(dyn Fn(PipelineProgress) + Sync),
+    ) -> OcrResult<Vec<PageResult>> {
+        self.process_pdf_window(path, Some((first, last)), progress)
+    }
+
+    fn process_pdf_window(
+        &self,
+        path: &Path,
+        range: Option<(usize, usize)>,
+        progress: &(dyn Fn(PipelineProgress) + Sync),
+    ) -> OcrResult<Vec<PageResult>> {
         let pdfium = self.pdfium.as_ref().ok_or_else(|| {
             OcrError::Pdf(
                 "no pdfium library configured; set ZEIDEX_PDFIUM_LIBRARY or bundle the shared library"
@@ -148,13 +205,15 @@ impl OcrEngine {
             .load_pdf_from_file(path, None)
             .map_err(|err| OcrError::Pdf(err.to_string()))?;
         let total = pdf::page_count(&document).max(0) as usize;
+        let window = pdf_page_window(total, range)?;
+        let selected = window.len();
 
-        progress(PipelineProgress::Started { pages: total });
+        progress(PipelineProgress::Started { pages: selected });
         let chunk = rayon::current_num_threads().max(1);
-        let mut results: Vec<PageResult> = Vec::with_capacity(total);
-        let mut start = 0usize;
-        while start < total {
-            let end = (start + chunk).min(total);
+        let mut results: Vec<PageResult> = Vec::with_capacity(selected);
+        let mut start = window.start;
+        while start < window.end {
+            let end = (start + chunk).min(window.end);
             let images = (start..end)
                 .map(|index| pdf::render_document_page(&document, index as i32, self.dpi))
                 .collect::<OcrResult<Vec<_>>>()?;
@@ -164,7 +223,13 @@ impl OcrEngine {
                 .map(|(offset, image)| {
                     let page = start + offset;
                     let result = self.process_page_image(page, image);
-                    progress(PipelineProgress::PageDone { page, pages: total });
+                    // Progress counts work done within this run; the page a
+                    // result belongs to is `PageResult::page_index`. A range
+                    // therefore reports "3 of 5 selected", never "page 42 of 5".
+                    progress(PipelineProgress::PageDone {
+                        page: page - window.start,
+                        pages: selected,
+                    });
                     result
                 })
                 .collect();
@@ -301,4 +366,40 @@ fn has_extension(path: &Path, extension: &str) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .is_some_and(|value| value.eq_ignore_ascii_case(extension))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pdf_page_window;
+
+    #[test]
+    fn all_pages_when_no_window_is_asked_for() {
+        assert_eq!(pdf_page_window(5, None).ok(), Some(0..5));
+        assert_eq!(pdf_page_window(0, None).ok(), Some(0..0));
+    }
+
+    #[test]
+    fn an_inclusive_window_becomes_a_zero_based_range() {
+        assert_eq!(pdf_page_window(10, Some((3, 5))).ok(), Some(2..5));
+        assert_eq!(pdf_page_window(10, Some((1, 1))).ok(), Some(0..1));
+        assert_eq!(pdf_page_window(10, Some((10, 10))).ok(), Some(9..10));
+    }
+
+    #[test]
+    fn a_last_page_past_the_end_is_clamped() {
+        assert_eq!(pdf_page_window(4, Some((2, 99))).ok(), Some(1..4));
+    }
+
+    #[test]
+    fn a_first_page_past_the_end_is_an_error() {
+        let err = pdf_page_window(4, Some((5, 6))).expect_err("must reject");
+        assert!(err.to_string().contains("past the end"), "{err}");
+    }
+
+    #[test]
+    fn a_reversed_zero_based_or_empty_window_is_an_error() {
+        assert!(pdf_page_window(4, Some((3, 2))).is_err());
+        assert!(pdf_page_window(4, Some((0, 1))).is_err());
+        assert!(pdf_page_window(0, Some((1, 1))).is_err());
+    }
 }

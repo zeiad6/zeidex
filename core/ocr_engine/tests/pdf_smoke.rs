@@ -96,6 +96,12 @@ fn pdf_renders_and_ocrs_into_a_real_table() -> zeidex_ocr::OcrResult<()> {
     expected.sort_unstable();
     assert_eq!(texts, expected, "each PDF cell carries its recognized text");
 
+    // A window starting past the end must be rejected with the real page count,
+    // not reported as an empty success: the Studio shows that sentence.
+    let past_end = engine.process_pdf_range(Path::new(&pdf_path), 2, 2, &progress);
+    let message = past_end.expect_err("a page past the end must be rejected");
+    assert!(message.to_string().contains("past the end"), "{message}");
+
     let preview = engine.page_preview(Path::new(&pdf_path), 0, 1200)?;
     let image = image::load_from_memory(&preview.png).expect("preview is a PNG");
     let (width, height) = image.dimensions();
