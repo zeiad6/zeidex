@@ -265,7 +265,7 @@ make core-test     # the whole Rust workspace
 make core-fmt      # formatting
 make core-clippy   # clippy, unwrap/expect denied in production paths
 make frontend-build
-make ocr-test      # real models: OCR, table grid, accuracy, PDF, Word/Excel export (ORT_DYLIB_PATH)
+make ocr-test      # real models: OCR (English and Arabic), table grid, accuracy, PDF, Word/Excel export (ORT_DYLIB_PATH)
 ```
 
 ## Usage
@@ -373,9 +373,14 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - [x] Editable regions and tables in the Studio
 - [x] `.docx` / `.xlsx` export with RTL support
 - [x] Full RTL interface
-- [ ] Better Arabic recognizer (dense lines, Arabic-Indic digits) — evaluate
+- [x] Better Arabic recognizer — evaluated
       [`arabic_PP-OCRv5_mobile_rec_onnx`](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx)
-      (8 MB, same 48 px CTC decoder)
+      (8 MB, same 48 px CTC decoder): 0.30 against 0.50 character error rate on
+      clean synthetic lines once its visual-order output is converted, but
+      Arabic-Indic digit runs and mixed Arabic/Latin text stay weak, so it is not
+      the default on synthetic evidence alone
+- [ ] Adopt a new Arabic recognizer once a labelled corpus of real Arabic scans
+      confirms the gain
 - [ ] Handwriting and low-quality photo handling
 - [ ] Page-range selection when exporting a PDF
 - [ ] Signed installers for macOS, Windows and Linux

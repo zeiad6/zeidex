@@ -96,9 +96,10 @@ cargo test --workspace --manifest-path core/Cargo.toml
 ```
 
 Real-model tests (`ocr_engine/tests/` and one exporter test) skip unless
-`ZEIDEX_TEST_MODELS_DIR`, `ZEIDEX_TEST_IMAGE` and `ORT_DYLIB_PATH` are set, so a
-plain `cargo test` stays offline and fast. `make ocr-test` wires those plus the
-committed PDF fixture (`ocr_engine/tests/fixtures/table.pdf`) and the bundled
+`ZEIDEX_TEST_MODELS_DIR`, `ZEIDEX_TEST_IMAGE`, `ZEIDEX_TEST_ARABIC_IMAGE` and
+`ORT_DYLIB_PATH` are set, so a plain `cargo test` stays offline and fast.
+`make ocr-test` wires those plus the committed PDF and Arabic fixtures
+(`ocr_engine/tests/fixtures/table.pdf`, `arabic_lines.png`) and the bundled
 pdfium when present, and the `ocr-models` CI job installs pdfium and runs the
 same tests against the real models.
 

@@ -58,6 +58,7 @@ ocr-test:
 		{ echo "run 'make models' first" >&2; exit 1; }
 	@export ZEIDEX_TEST_MODELS_DIR="$(CURDIR)/third_party/models"; \
 	 export ZEIDEX_TEST_IMAGE="$(CURDIR)/core/ocr_engine/tests/fixtures/table.png"; \
+	 export ZEIDEX_TEST_ARABIC_IMAGE="$(CURDIR)/core/ocr_engine/tests/fixtures/arabic_lines.png"; \
 	 export ZEIDEX_TEST_TABLE_IMAGE="$(CURDIR)/core/ocr_engine/tests/fixtures/table.png"; \
 	 export ZEIDEX_TEST_PDF="$(CURDIR)/core/ocr_engine/tests/fixtures/table.pdf"; \
 	 if [ -f "$(CURDIR)/src-tauri/resources/lib/libpdfium.so" ]; then \
@@ -66,7 +67,7 @@ ocr-test:
 	 if [ -n "$$ZEIDEX_ORT_DYLIB" ]; then export ORT_DYLIB_PATH="$$ZEIDEX_ORT_DYLIB"; fi; \
 	 cargo test --manifest-path $(CORE_MANIFEST) -p zeidex-ocr \
 		--test ocr_smoke --test layout_smoke --test table_smoke --test ocr_accuracy \
-		--test pdf_smoke -- --nocapture && \
+		--test arabic_smoke --test pdf_smoke -- --nocapture && \
 	 cargo test --manifest-path $(CORE_MANIFEST) -p zeidex-exporter \
 		--test export ocr_output_exports_to_word_and_excel -- --nocapture
 

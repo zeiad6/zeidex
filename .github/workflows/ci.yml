@@ -103,12 +103,13 @@ jobs:
         env:
           ZEIDEX_TEST_MODELS_DIR: ${{ github.workspace }}/third_party/models
           ZEIDEX_TEST_IMAGE: ${{ github.workspace }}/core/ocr_engine/tests/fixtures/table.png
+          ZEIDEX_TEST_ARABIC_IMAGE: ${{ github.workspace }}/core/ocr_engine/tests/fixtures/arabic_lines.png
           ZEIDEX_TEST_TABLE_IMAGE: ${{ github.workspace }}/core/ocr_engine/tests/fixtures/table.png
           ZEIDEX_TEST_PDF: ${{ github.workspace }}/core/ocr_engine/tests/fixtures/table.pdf
         run: |
           cargo test --manifest-path core/Cargo.toml -p zeidex-ocr \
             --test ocr_smoke --test layout_smoke --test table_smoke --test ocr_accuracy \
-            --test pdf_smoke
+            --test arabic_smoke --test pdf_smoke
           cargo test --manifest-path core/Cargo.toml -p zeidex-exporter \
             --test export ocr_output_exports_to_word_and_excel
 

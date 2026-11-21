@@ -93,6 +93,17 @@ in `src-tauri/resources/lib/` before packaging (the bundler copies them to
   Arabic-Indic digits (`١٢٣٤٥` → `٢٣٥`). This is a model limit, not a pipeline
   bug; replacing `ppocrv4_rec_ar.onnx` and `arabic_dict.txt` is the upgrade
   path, and the editor exists because of it.
+- **The PP-OCRv5 Arabic candidate was measured and is not the default yet.**
+  `arabic_PP-OCRv5_mobile_rec_onnx` (8 MB, Apache-2.0) was compared on the same
+  renders in two typefaces, clean and degraded (blur, sensor noise, JPEG). It
+  is decisively better on clean letterforms once its output is converted from
+  visual to logical order — character error rate 0.30 against 0.50 — but it
+  still loses Arabic-Indic digit runs and mixed Arabic/Latin text, so with
+  degraded and mixed lines the gap narrows to 0.60 against 0.65. Swapping the
+  default on synthetic evidence alone would trade a known limitation for an
+  unmeasured one; a labelled corpus of real Arabic scans is the missing input.
+  `arabic_smoke.rs` pins the current exact-match baseline so the regression is
+  caught either way.
 - Very small text (below ~20 px) degrades both scripts, since recognition
   normalizes every line to 48 px tall.
 - Layout is only as good as PicoDet's five classes. When the layout model does
