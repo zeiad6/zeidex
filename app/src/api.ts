@@ -110,6 +110,57 @@ export type PipelineProgress =
   | { type: "page_done"; page: number; pages: number }
   | { type: "finished" };
 
+/**
+ * Bounds for the numeric settings. They travel from the backend, which enforces
+ * the same numbers, so the two cannot drift apart in a copy.
+ */
+export interface SettingLimits {
+  fileScanDepth: [number, number];
+  fileScanLimit: [number, number];
+  clipboardHistoryLimit: [number, number];
+  clipboardRetentionDays: [number, number];
+}
+
+export interface AppSettings {
+  version: string;
+  platform: string;
+  configPath: string | null;
+  dbPath: string;
+  candidateCount: number;
+  fileScanDepth: number;
+  fileScanLimit: number;
+  fileScanExtraRoots: string[];
+  lazyIndexingEnabled: boolean;
+  localizedAppNames: boolean;
+  clipboardHistoryLimit: number;
+  clipboardFilterSecrets: boolean;
+  clipboardRetentionDays: number;
+  clipboardPaused: boolean;
+  webSearchEnabled: boolean;
+  webSearchEngine: string;
+  searchEngines: string[];
+  limits: SettingLimits;
+}
+
+/** Only the fields the user changed; omitted keys are left untouched. */
+export interface SettingsPatch {
+  fileScanDepth?: number;
+  fileScanLimit?: number;
+  fileScanExtraRoots?: string[];
+  lazyIndexingEnabled?: boolean;
+  localizedAppNames?: boolean;
+  clipboardHistoryLimit?: number;
+  clipboardFilterSecrets?: boolean;
+  clipboardRetentionDays?: number;
+  webSearch?: { enabled: boolean; engine: string };
+}
+
+export interface SettingsUpdate {
+  settings: AppSettings;
+  reindexRequired: boolean;
+  warning: string | null;
+}
+
 export const api = {
   search: (query: string, limit = 10) =>
     invoke<LaunchResult[]>("search", { query, limit }),
@@ -120,7 +171,10 @@ export const api = {
     invoke<void>("record_usage", { candidateId, action }),
   clipboardList: (kind: string, query: string, limit = 100) =>
     invoke<ClipEntry[]>("clipboard_list", { kind, query, limit }),
-  clipboardPoll: () => invoke<ClipEntry | null>("clipboard_poll"),
+  clipboardPoll: () => invoke<null>("clipboard_poll"),
+  clipboardPaused: () => invoke<boolean>("clipboard_paused"),
+  clipboardSetPaused: (paused: boolean) =>
+    invoke<boolean>("clipboard_set_paused", { paused }),
   clipboardDelete: (id: number) => invoke<boolean>("clipboard_delete", { id }),
   clipboardSetPinned: (id: number, pinned: boolean) =>
     invoke<boolean>("clipboard_set_pinned", { id, pinned }),
@@ -132,6 +186,9 @@ export const api = {
   dbPath: () => invoke<string>("db_path"),
   configPath: () => invoke<string>("config_path"),
   appVersion: () => invoke<string>("app_version"),
+  settingsSnapshot: () => invoke<AppSettings>("settings_snapshot"),
+  settingsUpdate: (patch: SettingsPatch) =>
+    invoke<SettingsUpdate>("settings_update", { patch }),
   translateText: (text: string, targetLang: string) =>
     invoke<TranslationOutcome>("translate_text", { text, targetLang }),
   ocrModelsStatus: () => invoke<ModelsStatus>("ocr_models_status"),

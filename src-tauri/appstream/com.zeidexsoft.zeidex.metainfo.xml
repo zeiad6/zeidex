@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata: what software centres (GNOME Software, KDE Discover)
+  read to describe the app. Screenshots are deliberately absent until real ones
+  are captured on Linux; an empty section is better than a stock photo claiming
+  to be this product.
+-->
+<component type="desktop-application">
+  <id>com.zeidexsoft.zeidex</id>
+
+  <name>Zeidex Studio</name>
+  <summary>Offline launcher and document OCR studio</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="com.zeidexsoft">
+    <name>Zeidexsoft</name>
+  </developer>
+
+  <description>
+    <p>
+      Zeidex Studio is a launcher and a document studio in one window. It finds
+      applications, files and folders as you type, keeps a local clipboard
+      history, and evaluates arithmetic inline.
+    </p>
+    <p>
+      The document studio turns scans and PDFs into editable Word and Excel
+      files using OCR that runs on this device. No account is required, nothing
+      is uploaded, and there is no telemetry.
+    </p>
+    <p>
+      The interface is available in English and Arabic, including full
+      right-to-left layout.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">Zeidex Studio.desktop</launchable>
+
+  <url type="homepage">https://zeidexsoft.com</url>
+  <url type="bugtracker">https://github.com/zeiad6/zeidex/issues</url>
+
+  <categories>
+    <category>Utility</category>
+    <category>Office</category>
+  </categories>
+
+  <keywords>
+    <keyword>launcher</keyword>
+    <keyword>search</keyword>
+    <keyword>clipboard</keyword>
+    <keyword>ocr</keyword>
+    <keyword>scanner</keyword>
+    <keyword>pdf</keyword>
+    <keyword>docx</keyword>
+    <keyword>xlsx</keyword>
+    <keyword>translation</keyword>
+  </keywords>
+
+  <provides>
+    <binary>zeidex</binary>
+  </provides>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-11-21">
+      <description>
+        <p>First packaged release: launcher, clipboard history, calculator, translation and the offline OCR studio.</p>
+      </description>
+    </release>
+  </releases>
+</component>

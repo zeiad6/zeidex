@@ -35,7 +35,10 @@ pub async fn ocr_page_preview(
 ) -> Result<PagePreview, String> {
     let engine = state.ocr_engine().map_err(|err| err.to_string())?;
     let page = page.unwrap_or(0);
-    let max_side = max_side.unwrap_or(1400);
+    // Bounded: the page is rendered at this size and then base64-encoded, which
+    // multiplies the cost, so an unbounded value from a bad caller could
+    // exhaust memory. 4000 px still covers an A4 page at 300 dpi.
+    let max_side = max_side.unwrap_or(1400).clamp(200, 4000);
     let preview = tauri::async_runtime::spawn_blocking(move || {
         engine.page_preview(Path::new(&path), page, max_side)
     })
@@ -53,25 +56,28 @@ pub async fn ocr_page_preview(
 
 /// Exports a recognized page to `.docx`. The page arrives as JSON from the
 /// Studio, which keeps the OCR result editable before export.
-#[tauri::command]
+///
+/// `(async)`: packing a document is a zip write to disk, and a command without
+/// it does that on the main thread.
+#[tauri::command(async)]
 pub fn export_docx(page: PageResult, path: String) -> Result<(), String> {
     zeidex_exporter::docx::export_docx(&page, Path::new(&path)).map_err(|err| err.to_string())
 }
 
 /// Exports every recognized page into one `.docx`, separated by page breaks.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_docx_pages(pages: Vec<PageResult>, path: String) -> Result<(), String> {
     zeidex_exporter::docx::export_docx_pages(&pages, Path::new(&path))
         .map_err(|err| err.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_xlsx(page: PageResult, path: String) -> Result<(), String> {
     zeidex_exporter::xlsx::export_xlsx(&page, Path::new(&path)).map_err(|err| err.to_string())
 }
 
 /// Exports every recognized page as its own worksheet in one `.xlsx`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_xlsx_pages(pages: Vec<PageResult>, path: String) -> Result<(), String> {
     zeidex_exporter::xlsx::export_xlsx_pages(&pages, Path::new(&path))
         .map_err(|err| err.to_string())
@@ -79,7 +85,7 @@ pub fn export_xlsx_pages(pages: Vec<PageResult>, path: String) -> Result<(), Str
 
 /// Which model files are present, so the OCR Studio can show a clear message
 /// instead of a runtime error when the user has not run `fetch_models.sh`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ocr_models_status(state: State<'_, AppState>) -> Result<ModelsStatus, String> {
     let paths = zeidex_ocr::onnx::ModelPaths::from_dir(&state.models_dir);
     Ok(ModelsStatus {

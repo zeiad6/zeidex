@@ -47,19 +47,27 @@ impl BBox {
     /// Intersection-over-union, used to drop boxes a layout model and a text
     /// detector both produced.
     pub fn iou(&self, other: &Self) -> f32 {
-        let x0 = self.x0.max(other.x0);
-        let y0 = self.y0.max(other.y0);
-        let x1 = self.x1.min(other.x1);
-        let y1 = self.y1.min(other.y1);
-        if x1 <= x0 || y1 <= y0 {
-            return 0.0;
-        }
-        let intersection = (x1 - x0) * (y1 - y0);
+        let intersection = self.intersection_area(other);
         let union = self.area() + other.area() - intersection;
         if union <= 0.0 {
             0.0
         } else {
             intersection / union
+        }
+    }
+
+    /// Shared area with `other`; zero when the rectangles do not overlap.
+    /// Table-cell assignment needs the raw overlap: IoU would punish a small
+    /// glyph box inside a large cell even though the glyph belongs to it.
+    pub fn intersection_area(&self, other: &Self) -> f32 {
+        let x0 = self.x0.max(other.x0);
+        let y0 = self.y0.max(other.y0);
+        let x1 = self.x1.min(other.x1);
+        let y1 = self.y1.min(other.y1);
+        if x1 <= x0 || y1 <= y0 {
+            0.0
+        } else {
+            (x1 - x0) * (y1 - y0)
         }
     }
 
@@ -90,6 +98,14 @@ mod tests {
         let a = BBox::new(0.0, 0.0, 10.0, 10.0);
         let b = BBox::new(20.0, 20.0, 30.0, 30.0);
         assert_eq!(a.iou(&b), 0.0);
+    }
+
+    #[test]
+    fn intersection_area_measures_the_shared_part() {
+        let a = BBox::new(0.0, 0.0, 10.0, 10.0);
+        let b = BBox::new(5.0, 5.0, 15.0, 15.0);
+        assert!((a.intersection_area(&b) - 25.0).abs() < 1e-6);
+        assert_eq!(a.intersection_area(&BBox::new(20.0, 20.0, 30.0, 30.0)), 0.0);
     }
 
     #[test]

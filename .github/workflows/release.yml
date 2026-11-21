@@ -120,6 +120,34 @@ jobs:
           tauriScript: npx --prefix app tauri
           args: --bundles ${{ matrix.bundles }}
 
+      # tauri-cli appends a hard `libgtk-3-0` dependency after the configured
+      # list; that name has no candidate on Ubuntu 24.04+/Debian 13, where the
+      # time_t transition renamed it to libgtk-3-0t64. Rewrite the control file
+      # before anything installs or uploads the artifact.
+      - name: Repair the deb dependency list
+        if: runner.os == 'Linux'
+        run: ./scripts/fix-deb-depends.sh src-tauri/target/release/bundle/deb/*.deb
+
+      # The bundle is installed, not just built: a wrong dependency name (for
+      # example `libgtk-3-0` on a distro that renamed it to `libgtk-3-0t64`)
+      # only shows up when dpkg resolves it against the archive.
+      - name: Install the package and verify registration (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb
+          dpkg -s zeidex-studio | grep -E '^(Status|Version):'
+          test -x /usr/bin/zeidex
+          test -f "/usr/lib/Zeidex Studio/models/ppocrv4_det.onnx"
+          test -f "/usr/lib/Zeidex Studio/lib/libonnxruntime.so"
+
+      # tauri-action already attached the pre-repair deb to the draft release;
+      # replace it so the published artifact is the installable one.
+      - name: Replace the deb in the draft release
+        if: runner.os == 'Linux' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" src-tauri/target/release/bundle/deb/*.deb --clobber
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:

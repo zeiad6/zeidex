@@ -170,9 +170,11 @@ const REC_DEFAULT_WIDTH: u32 = 320;
 /// Long-side limit for text detection.
 ///
 /// Scene-text PP-OCR defaults to 960 px, but a 300 DPI A4 page is 2480 x 3508.
-/// Downscaling to 960 erases the stroke detail that separates Arabic letter
-/// forms, so documents get a much larger budget by default.
-pub const DETECT_MAX_SIDE: u32 = 1600;
+/// 1600 px is only 137 DPI on that page: a probe on the PDF fixture showed the
+/// detector dropping an isolated digit in a table column, while 2400 px
+/// recovers it at 0.999 confidence. 2400 is ~205 DPI for A4 and keeps memory
+/// bounded; the cap is still applied before every detection pass.
+pub const DETECT_MAX_SIDE: u32 = 2400;
 
 /// Detects text-line boxes with the PP-OCRv4 DBNet model at the default
 /// [`DETECT_MAX_SIDE`].
@@ -630,12 +632,40 @@ pub fn detect_table(
     image: &DynamicImage,
     region: &Region,
 ) -> OcrResult<TableStructure> {
-    let cropped = crop(image, region.bbox);
+    // Layout boxes can extend past the page edge. Crop and map against the
+    // clamped rectangle; using the unclamped one would shift every cell by the
+    // clipped margin.
+    let (image_width, image_height) = image.dimensions();
+    let region_bbox = region.bbox.clamp(image_width, image_height);
+    let cropped = crop(image, region_bbox);
     let rgb = cropped.to_rgb8();
-    let size = 896u32;
-    let resized = image::imageops::resize(&rgb, size, size, image::imageops::FilterType::Triangle);
-    let data = rgb_to_imagenet_chw(&resized);
-    let tensor = Tensor::from_array(([1usize, 3, size as usize, size as usize], data))?;
+    // SLANet is trained on 488x488 table crops: the long side is scaled to 488
+    // and the remainder padded, preserving the table's aspect. Resizing straight
+    // to 896x896 stretched wide tables until columns collapsed (a 3-column table
+    // decoded as 2), which left recognized text with no cell to land in.
+    const TABLE_INPUT_SIDE: u32 = 488;
+    let (width, height) = rgb.dimensions();
+    let scale = TABLE_INPUT_SIDE as f32 / width.max(height).max(1) as f32;
+    let resized_w = ((width as f32 * scale).round() as u32).clamp(1, TABLE_INPUT_SIDE);
+    let resized_h = ((height as f32 * scale).round() as u32).clamp(1, TABLE_INPUT_SIDE);
+    let resized = image::imageops::resize(
+        &rgb,
+        resized_w,
+        resized_h,
+        image::imageops::FilterType::Triangle,
+    );
+    let mut canvas = RgbImage::from_pixel(TABLE_INPUT_SIDE, TABLE_INPUT_SIDE, Rgb([0, 0, 0]));
+    image::imageops::replace(&mut canvas, &resized, 0, 0);
+    let data = rgb_to_imagenet_chw(&canvas);
+    let tensor = Tensor::from_array((
+        [
+            1usize,
+            3,
+            TABLE_INPUT_SIDE as usize,
+            TABLE_INPUT_SIDE as usize,
+        ],
+        data,
+    ))?;
 
     let mut session = models
         .table
@@ -647,6 +677,11 @@ pub fn detect_table(
     let (score_shape, scores) = outputs[1].try_extract_tensor::<f32>()?;
     let classes = (*score_shape.last().unwrap_or(&1)).max(1) as usize;
     let positions = boxes.len() / 4;
+
+    // Boxes are normalized over the padded square canvas. Undo the padding so a
+    // box lands on the text it belongs to instead of in the blank band below it.
+    let x_scale = TABLE_INPUT_SIDE as f32 / resized_w as f32;
+    let y_scale = TABLE_INPUT_SIDE as f32 / resized_h as f32;
 
     let mut tokens: Vec<i64> = Vec::with_capacity(positions);
     let mut normalized: Vec<BBox> = Vec::with_capacity(positions);
@@ -670,20 +705,20 @@ pub fn detect_table(
             class
         });
         normalized.push(BBox::new(
-            boxes[box_base],
-            boxes[box_base + 1],
-            boxes[box_base + 2],
-            boxes[box_base + 3],
+            (boxes[box_base] * x_scale).clamp(0.0, 1.0),
+            (boxes[box_base + 1] * y_scale).clamp(0.0, 1.0),
+            (boxes[box_base + 2] * x_scale).clamp(0.0, 1.0),
+            (boxes[box_base + 3] * y_scale).clamp(0.0, 1.0),
         ));
     }
 
     let mut structure =
-        table::decode_structure(&models.table_dict, &tokens, &normalized, region.bbox);
+        table::decode_structure(&models.table_dict, &tokens, &normalized, region_bbox);
     // A structure head that produced no cell tokens leaves nothing to export;
     // fall back to a single cell covering the region instead of an empty table.
     if structure.cells.is_empty() {
         structure = TableStructure {
-            bbox: region.bbox,
+            bbox: region_bbox,
             rows: 1,
             cols: 1,
             cells: vec![table::TableCell {
@@ -691,7 +726,7 @@ pub fn detect_table(
                 col: 0,
                 row_span: 1,
                 col_span: 1,
-                bbox: region.bbox,
+                bbox: region_bbox,
                 text: String::new(),
             }],
         };

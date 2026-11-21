@@ -32,6 +32,14 @@ const KIND: Record<string, { icon: IconName; label: string; labelAr: string; ton
     labelAr: "إجراء",
     tone: "text-fuchsia-300 bg-fuchsia-400/10 ring-fuchsia-400/20",
   },
+  // Composed by the shell, not indexed: the row that hands the query to the
+  // browser. Without an entry it would borrow the file icon and label.
+  web: {
+    icon: "globe",
+    label: "Web",
+    labelAr: "ويب",
+    tone: "text-sky-300 bg-sky-400/10 ring-sky-400/20",
+  },
 };
 
 function hint(action: LaunchResultAction, rtl: boolean): string {
@@ -124,7 +132,7 @@ export default function ResultList({
                   <span className="truncate text-[0.9rem] font-medium text-zinc-100">
                     {result.title}
                   </span>
-                  <span className="shrink-0 rounded-md border border-white/10 px-1.5 py-px text-[0.5625rem] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                  <span className="shrink-0 rounded-md border border-white/10 px-1.5 py-px text-[0.5625rem] font-medium micro-label tracking-[0.12em] text-zinc-500">
                     {rtl ? meta.labelAr : meta.label}
                   </span>
                 </span>
@@ -138,7 +146,7 @@ export default function ResultList({
               </span>
 
               <span
-                className={`shrink-0 text-[0.625rem] font-medium uppercase tracking-[0.14em] transition-colors ${
+                className={`shrink-0 text-[0.625rem] font-medium micro-label tracking-[0.14em] transition-colors ${
                   active ? "text-accent-300" : "text-zinc-600"
                 }`}
               >

@@ -8,7 +8,9 @@ use crate::scoring::{
 use std::collections::BinaryHeap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zeidex_indexing::{Candidate, CandidateKind};
-use zeidex_matching::{fuzzy_quality_bonus_prepared, fuzzy_score_prepared, prepare_query};
+use zeidex_matching::{
+    fuzzy_quality_bonus_prepared, fuzzy_score_prepared, normalize_for_search, prepare_query,
+};
 use zeidex_ranking::rank_score;
 
 const RERANK_POOL_MULTIPLIER: usize = 4;
@@ -142,7 +144,10 @@ impl QueryEngine {
             Vec::new()
         };
         let type_gated = !filter.categories.is_empty();
-        let terms = filter.terms.trim().to_lowercase();
+        // Folded the same way the indexed title and path were: filtering with
+        // `to_lowercase()` alone kept the diacritics, so `café` in the filter
+        // box missed a file indexed as `cafe`, and Arabic variants missed too.
+        let terms = normalize_for_search(filter.terms.trim());
 
         let mut matches: Vec<(u32, i64)> = Vec::new();
         for (idx, c) in self.candidates.iter().enumerate() {
@@ -166,8 +171,8 @@ impl QueryEngine {
             // gate only its own category: asking for "screenshots and pdfs"
             // must not drop every pdf whose path lacks the word.
             if want_screenshot && is_file {
-                let p = cand.path.to_lowercase();
-                let looks_like_screenshot = p.contains("screenshot") || p.contains("screen shot");
+                let looks_like_screenshot =
+                    c.path_search.contains("screenshot") || c.path_search.contains("screen shot");
                 let matches_other_category =
                     !other_exts.is_empty() && other_exts.contains(&ext_of(&cand.path).as_str());
                 if !looks_like_screenshot && !matches_other_category {
@@ -181,18 +186,17 @@ impl QueryEngine {
                 continue;
             }
             if !filter.locations.is_empty() {
-                let path = cand.path.to_lowercase();
-                let in_location = filter
-                    .locations
-                    .iter()
-                    .any(|loc| location_folder(loc).is_some_and(|f| path.contains(f)));
+                let in_location = filter.locations.iter().any(|loc| {
+                    location_folder(loc)
+                        .is_some_and(|folder| path_has_folder(&c.path_search, folder))
+                });
                 if !in_location {
                     continue;
                 }
             }
             if !terms.is_empty()
                 && !c.title_search.contains(&terms)
-                && !cand.path.to_lowercase().contains(&terms)
+                && !c.path_search.contains(&terms)
             {
                 continue;
             }
@@ -373,7 +377,9 @@ fn extensions_for(categories: &[String]) -> Vec<&'static str> {
 
 /// Lowercased extension of the filename in `path` (empty when none).
 fn ext_of(path: &str) -> String {
-    let name = path.rsplit('/').next().unwrap_or(path);
+    // Windows separates with `\`, so splitting on `/` alone left the whole path
+    // in `name` and a directory containing a dot became the "extension".
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     match name.rsplit_once('.') {
         Some((_, ext)) => ext.to_lowercase(),
         None => String::new(),
@@ -383,16 +389,26 @@ fn ext_of(path: &str) -> String {
 /// Path fragment a location hint scopes to.
 fn location_folder(loc: &str) -> Option<&'static str> {
     match loc {
-        "downloads" => Some("/downloads/"),
-        "desktop" => Some("/desktop/"),
-        "documents" => Some("/documents/"),
+        "downloads" => Some("downloads"),
+        "desktop" => Some("desktop"),
+        "documents" => Some("documents"),
         _ => None,
     }
 }
 
+/// True when any component of `path` is exactly `folder`.
+///
+/// Matches a whole component rather than a `/folder/` substring: the substring
+/// form never matched on Windows, where paths separate with `\`, and it also
+/// matched a file called `downloads` anywhere in the path.
+fn path_has_folder(path: &str, folder: &str) -> bool {
+    path.split(['/', '\\'])
+        .any(|part| part.eq_ignore_ascii_case(folder))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::QueryEngine;
+    use super::*;
 
     #[test]
     fn term_boundary_match_rejects_inner_substring() {
@@ -406,5 +422,25 @@ mod tests {
     fn term_boundary_match_accepts_full_token() {
         assert!(QueryEngine::has_term_boundary_match("arc browser", "arc"));
         assert!(QueryEngine::has_term_boundary_match("arc-browser", "arc"));
+    }
+
+    #[test]
+    fn extension_is_read_from_the_last_component_on_every_separator() {
+        assert_eq!(ext_of("/home/me/notes.TXT"), "txt");
+        // A dot in a directory name must not be mistaken for the extension.
+        assert_eq!(ext_of(r"C:\Users\a.b\notes.txt"), "txt");
+        assert_eq!(ext_of(r"C:\Users\me\archive.tar.gz"), "gz");
+        assert_eq!(ext_of(r"C:\Users\a.b\README"), "");
+    }
+
+    #[test]
+    fn location_matches_a_whole_path_component() {
+        assert!(path_has_folder("/home/me/Downloads", "downloads"));
+        assert!(path_has_folder(r"c:\users\me\downloads\a.pdf", "downloads"));
+        assert!(!path_has_folder(
+            "/home/me/downloads-2024/a.pdf",
+            "downloads"
+        ));
+        assert!(!path_has_folder("/home/me/MyDownloads/a.pdf", "downloads"));
     }
 }

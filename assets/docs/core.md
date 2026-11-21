@@ -51,18 +51,28 @@ dictionaries), `geometry.rs`, `pdf.rs`, `pipeline.rs` (the `OcrEngine`).
 Two details are load-bearing:
 
 - **Detection boxes.** The long side of the page is capped at
-  `DETECT_MAX_SIDE` (default 1600, configurable through
-  `OcrEngineConfig::det_max_side`), so 300 dpi pages keep their stroke detail.
-  Boxes are scaled back by the factor actually applied and then expanded with
-  PaddleOCR's `unclip` ratio, because DBNet's probability mask covers only the
-  middle band of a line; cropping it raw cuts off Arabic letter forms.
+  `DETECT_MAX_SIDE` (default 2400, configurable through
+  `OcrEngineConfig::det_max_side`). A 300 dpi A4 page is 2480 x 3508, so 1600
+  was only 137 dpi and dropped an isolated table digit; 2400 is ~205 dpi and
+  recovers it. Boxes are scaled back by the factor actually applied and then
+  expanded with PaddleOCR's `unclip` ratio, because DBNet's probability mask
+  covers only the middle band of a line; cropping it raw cuts off Arabic letter
+  forms.
 - **Table structure.** SLANet is a *sequence* decoder: structural tokens
   (`<thead>`, `<tr>`, `</tr>`, `<tbody>`) drive the grid and only cell tokens
   become cells, with spans read from `colspan`/`rowspan`. The class list comes
-  from `table_structure_dict.txt`, never from a hardcoded index. Regions the
-  layout model did not label `table` fall back to `table::from_ruling_lines`,
-  which recovers a grid from 3+ dark rows and columns and requires at least one
-  recognized cell, so a framed figure cannot become a table.
+  from `table_structure_dict.txt`, never from a hardcoded index, and is
+  completed the way PaddleOCR builds it: `<td>` dropped, `<td></td>` appended,
+  and the attention `sos`/`eos` classes at indices 0 and 29. Decoding stops at
+  `eos` so decoder padding cannot fabricate structure. The crop is
+  scaled to 488 px on its long side and padded on black, as the model was
+  trained; its boxes are normalized to that padded square, so the padding is
+  undone before cells are mapped back to page space. A word is assigned to the
+  cell it overlaps most, because the predicted cell boxes sit a few pixels off
+  the glyphs. Regions the layout model did not label `table` fall back to
+  `table::from_ruling_lines`, which recovers a grid from 3+ dark rows and
+  columns and requires at least one recognized cell, so a framed figure cannot
+  become a table.
 
 Models are downloaded once into `third_party/models` (`make models`) and loaded
 from `ZEIDEX_MODELS_DIR` at runtime, then from the bundled resources, then a
@@ -84,10 +94,11 @@ features); the default build is CPU-only.
 cargo test --workspace --manifest-path core/Cargo.toml
 ```
 
-Real-model smoke tests (`ocr_engine/tests/`) skip unless `ZEIDEX_TEST_MODELS_DIR`,
-`ZEIDEX_TEST_IMAGE` and `ORT_DYLIB_PATH` are set, so a plain `cargo test` stays
-offline and fast. `make ocr-test` wires all three for the committed fixture
-(`ocr_engine/tests/fixtures/table.png`), and the `ocr-models` CI job runs the
+Real-model tests (`ocr_engine/tests/` and one exporter test) skip unless
+`ZEIDEX_TEST_MODELS_DIR`, `ZEIDEX_TEST_IMAGE` and `ORT_DYLIB_PATH` are set, so a
+plain `cargo test` stays offline and fast. `make ocr-test` wires those plus the
+committed PDF fixture (`ocr_engine/tests/fixtures/table.pdf`) and the bundled
+pdfium when present, and the `ocr-models` CI job installs pdfium and runs the
 same tests against the real models.
 
 Benchmarks and stress tests live in `tools/perf`, a separate crate that is never bundled.

@@ -1097,4 +1097,46 @@ mod tests {
             Some("setting:update")
         );
     }
+
+    #[test]
+    fn arabic_typing_variants_find_the_indexed_title() {
+        let config = RuntimeConfig::default();
+        let candidate = Candidate::new(
+            "file.school",
+            CandidateKind::File,
+            "مدرسة الأطفال",
+            "/home/test/مدرسة الأطفال.pdf",
+        );
+        let engine = QueryEngine::new_with_config(vec![candidate], &config);
+
+        // The same word typed with a ta marbuta and without: both are what a
+        // user actually types, and both have to reach the indexed title.
+        for query in ["مدرسه", "مدرسة"] {
+            let results = engine.search_scored(query, 10);
+            assert_eq!(
+                results.first().map(|(candidate, _)| candidate.id.as_ref()),
+                Some("file.school"),
+                "query {query:?} did not find the file"
+            );
+        }
+    }
+
+    #[test]
+    fn arabic_indic_digits_match_western_digits_in_a_title() {
+        let config = RuntimeConfig::default();
+        let candidate = Candidate::new(
+            "file.invoice",
+            CandidateKind::File,
+            "فاتورة 2026.pdf",
+            "/home/test/فاتورة 2026.pdf",
+        );
+        let engine = QueryEngine::new_with_config(vec![candidate], &config);
+        assert_eq!(
+            engine
+                .search_scored("٢٠٢٦", 10)
+                .first()
+                .map(|(candidate, _)| candidate.id.as_ref()),
+            Some("file.invoice")
+        );
+    }
 }

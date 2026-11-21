@@ -31,8 +31,10 @@ Run everything from the repo root. `make help` lists every target.
 
 `make ocr-test` needs an ONNX Runtime shared library; it exports
 `ORT_DYLIB_PATH` from `ZEIDEX_ORT_DYLIB` if you set it, otherwise it uses the
-`ORT_DYLIB_PATH` already in the environment. The fixture page is committed
-(`core/ocr_engine/tests/fixtures/table.png`), so no extra assets are needed.
+`ORT_DYLIB_PATH` already in the environment. It also uses the bundled pdfium
+(`src-tauri/resources/lib/libpdfium.so`) for the PDF test when the file exists.
+The fixtures are committed (`core/ocr_engine/tests/fixtures/table.png` and
+`table.pdf`), so no extra assets are needed.
 
 ## Checks
 
@@ -49,9 +51,10 @@ CI (`.github/workflows/ci.yml`) runs on pull requests and manual dispatch:
 - **core** — fmt, clippy (`unwrap`/`expect` denied) and tests on Ubuntu and
   Windows.
 - **ocr-models** — downloads the models (cached on `SHA256SUMS`), fetches the
-  ONNX Runtime release, and runs the real-model detection, recognition, layout
-  and table tests. This is the job that would catch a decoder regression the
-  unit tests cannot see.
+  ONNX Runtime and pdfium releases, and runs the real-model detection,
+  recognition, layout, table, cell-accuracy, PDF-render and Word/Excel export
+  tests. This is the job that would catch a decoder regression the unit tests
+  cannot see.
 - **desktop (Ubuntu, Windows)** — installs the frontend, builds it, runs clippy
   with `-D warnings`, and `cargo check`s the shell.
 

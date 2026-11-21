@@ -42,6 +42,16 @@ serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+# `ShellExecuteW` replaces `cmd /C start`: cmd would split a filename or URL on
+# `&`, and a path is user-controlled text. Same crate version the engine already
+# links on Windows, so this adds no new dependency to the graph.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [profile.release]
 # Match the core workspace: a small, fast binary. `panic = "unwind"` stays the
 # default so a plugin panic cannot abort the process.

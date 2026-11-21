@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use zeidex_storage::MAX_CLIPBOARD_RETENTION_DAYS;
 use zeidex_tools::Tools;
 
 pub const APP_SCAN_DEPTH: usize = 3;
@@ -22,6 +23,16 @@ pub const FILE_SCAN_LIMIT_MIN: usize = 500;
 pub const FILE_SCAN_LIMIT_MAX: usize = 50_000;
 pub const FILE_EXCLUDE_PATHS: [&str; 0] = [];
 pub const LAZY_INDEXING_ENABLED: bool = true;
+
+/// Documented range for `clipboard_history_limit`. Out-of-range and malformed
+/// values fall back to the default rather than being clamped: a typo should not
+/// silently become a 10-clip history.
+pub const CLIPBOARD_HISTORY_LIMIT: usize = 1000;
+pub const CLIPBOARD_HISTORY_LIMIT_MIN: usize = 10;
+pub const CLIPBOARD_HISTORY_LIMIT_MAX: usize = 1000;
+/// Refuse clips that look like credentials. On by default; see
+/// `zeidex_storage::secrets` for the exact patterns.
+pub const CLIPBOARD_FILTER_SECRETS: bool = true;
 
 pub const SCORE_TITLE_CONTAINS: i64 = 1200;
 pub const SCORE_SUBTITLE_CONTAINS: i64 = 900;
@@ -88,6 +99,13 @@ pub struct RuntimeConfig {
     pub ignored_file_patterns: Vec<String>,
     pub lazy_indexing_enabled: bool,
     pub localized_app_names: bool,
+    /// Unpinned text clips kept in the clipboard history.
+    pub clipboard_history_limit: usize,
+    /// Whether credential-shaped clips are refused instead of stored.
+    pub clipboard_filter_secrets: bool,
+    /// Delete unpinned text clips older than this many days. `0` keeps them
+    /// until the size limit evicts them, which is the upgrade-safe default.
+    pub clipboard_retention_days: u32,
     pub search_aliases: HashMap<String, Vec<String>>,
     pub tools: Tools,
 }
@@ -120,6 +138,9 @@ impl Default for RuntimeConfig {
             ignored_file_patterns: Vec::new(),
             lazy_indexing_enabled: LAZY_INDEXING_ENABLED,
             localized_app_names: false,
+            clipboard_history_limit: CLIPBOARD_HISTORY_LIMIT,
+            clipboard_filter_secrets: CLIPBOARD_FILTER_SECRETS,
+            clipboard_retention_days: 0,
             search_aliases: default_search_aliases(),
             tools: Tools::default(),
         }
@@ -147,6 +168,17 @@ impl RuntimeConfig {
             config.apply_from_file(&path);
             config.ensure_default_file_scan_roots_present();
         }
+        config
+    }
+
+    /// Parses the config at `path` on top of the defaults, without the
+    /// process-wide cache and without the default-file maintenance. The Settings
+    /// writer uses this to read back exactly the file it just wrote, so a test
+    /// never depends on where `$HOME` points.
+    pub fn load_from(path: &Path) -> Self {
+        let mut config = Self::default();
+        config.apply_from_file(path);
+        config.ensure_default_file_scan_roots_present();
         config
     }
 
@@ -217,7 +249,13 @@ impl RuntimeConfig {
         let Ok(contents) = std::fs::read_to_string(path) else {
             return;
         };
+        self.apply_from_contents(&contents);
+    }
 
+    /// The parser proper. Split out of `apply_from_file` so the Settings Center
+    /// tests can prove that what the writer produced is what the parser reads,
+    /// without a home directory or a process-wide override.
+    fn apply_from_contents(&mut self, contents: &str) {
         let home = user_home_dir();
         for raw_line in contents.lines() {
             let line = strip_comments(raw_line).trim();
@@ -336,6 +374,33 @@ impl RuntimeConfig {
                         self.localized_app_names = parsed;
                     }
                 }
+                "clipboard_history_limit" => {
+                    // The config comment promises 10-1000 and says out-of-range
+                    // values fall back to the default; honour exactly that.
+                    self.clipboard_history_limit = parse_positive_usize(value)
+                        .filter(|parsed| {
+                            (CLIPBOARD_HISTORY_LIMIT_MIN..=CLIPBOARD_HISTORY_LIMIT_MAX)
+                                .contains(parsed)
+                        })
+                        .unwrap_or(CLIPBOARD_HISTORY_LIMIT);
+                }
+                "clipboard_filter_secrets" => {
+                    if let Some(parsed) = parse_bool(value) {
+                        self.clipboard_filter_secrets = parsed;
+                    }
+                }
+                "clipboard_retention_days" => {
+                    // 0 is the default and means "no age limit". Anything this
+                    // parser cannot read - prose, a negative number, a value
+                    // above the documented ceiling - keeps 0: for a setting that
+                    // deletes history, a typo must not start deleting it.
+                    self.clipboard_retention_days = value
+                        .trim()
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|days| *days <= MAX_CLIPBOARD_RETENTION_DAYS)
+                        .unwrap_or(0);
+                }
                 _ if key.strip_prefix("alias_").is_some() => {
                     if let Some(alias_key) = key.strip_prefix("alias_") {
                         apply_alias_override(alias_key, value, &mut self.search_aliases);
@@ -346,6 +411,264 @@ impl RuntimeConfig {
             }
         }
     }
+}
+
+/// Longest single scan-folder entry accepted by the Settings writer. Far above
+/// any real path, low enough that a paste of a document cannot become a config.
+const MAX_CONFIG_PATH_CHARS: usize = 4096;
+
+/// The value a settable key takes. Typed rather than a raw string so the
+/// Settings Center cannot send `true` where the parser expects a number and get
+/// a silent fallback: `canonical_setting` is the one place that decides what is
+/// acceptable, and it uses the same constants the parser does.
+#[derive(Clone, Copy, Debug)]
+pub enum SettingValue<'a> {
+    Bool(bool),
+    Integer(u32),
+    PathList(&'a [String]),
+}
+
+/// The only keys the Settings Center writes. Anything else is rejected: a typo
+/// appended to the file would be a line the parser ignores, which reads as
+/// "saved" and does nothing.
+const BOOL_SETTING_KEYS: [&str; 3] = [
+    "lazy_indexing_enabled",
+    "localized_app_names",
+    "clipboard_filter_secrets",
+];
+
+const PATH_LIST_SETTING_KEYS: [&str; 1] = ["file_scan_extra_roots"];
+
+/// The documented range of one writable integer key, or `None` when the key is
+/// not an integer setting. The Settings Center shows these bounds and the
+/// writer enforces them, so the two cannot disagree.
+pub fn setting_bounds(key: &str) -> Option<(u32, u32)> {
+    match key {
+        "file_scan_depth" => Some((FILE_SCAN_DEPTH_MIN as u32, FILE_SCAN_DEPTH_MAX as u32)),
+        "file_scan_limit" => Some((FILE_SCAN_LIMIT_MIN as u32, FILE_SCAN_LIMIT_MAX as u32)),
+        "clipboard_history_limit" => Some((
+            CLIPBOARD_HISTORY_LIMIT_MIN as u32,
+            CLIPBOARD_HISTORY_LIMIT_MAX as u32,
+        )),
+        "clipboard_retention_days" => Some((0, MAX_CLIPBOARD_RETENTION_DAYS)),
+        _ => None,
+    }
+}
+
+/// The text to write for `key`, after checking the value against that key's
+/// documented range. The error text is shown to the user as-is.
+pub fn canonical_setting(key: &str, value: SettingValue<'_>) -> Result<String, String> {
+    match value {
+        SettingValue::Bool(enabled) => {
+            if !BOOL_SETTING_KEYS.contains(&key) {
+                return Err(format!("{key} is not a true/false setting"));
+            }
+            Ok(if enabled { "true" } else { "false" }.to_string())
+        }
+        SettingValue::Integer(number) => {
+            let Some((min, max)) = setting_bounds(key) else {
+                return Err(format!("{key} is not a numeric setting"));
+            };
+            if !(min..=max).contains(&number) {
+                return Err(format!("{key} must be between {min} and {max}"));
+            }
+            Ok(number.to_string())
+        }
+        SettingValue::PathList(entries) => {
+            if !PATH_LIST_SETTING_KEYS.contains(&key) {
+                return Err(format!("{key} does not take a list of paths"));
+            }
+            serialize_path_list(entries)
+        }
+    }
+}
+
+/// Joins paths with the commas `parse_csv` splits on, escaping the two
+/// characters the reader treats specially. A line break is refused, not
+/// escaped: it would start a new config line, and no path can contain one.
+fn serialize_path_list(entries: &[String]) -> Result<String, String> {
+    let mut serialized: Vec<String> = Vec::with_capacity(entries.len());
+    for raw in entries {
+        let entry = raw.trim();
+        if entry.is_empty() {
+            return Err("a scan folder is empty".to_string());
+        }
+        if entry.chars().count() > MAX_CONFIG_PATH_CHARS {
+            return Err(format!(
+                "a scan folder is longer than {MAX_CONFIG_PATH_CHARS} characters"
+            ));
+        }
+        if entry.chars().any(|character| character.is_control()) {
+            return Err("a scan folder cannot contain a control character".to_string());
+        }
+        // `strip_comments` cuts a value at ` #`; a path that would be cut must
+        // be refused, or the file would hold a different path than the UI shows.
+        if strip_comments(entry) != entry {
+            return Err(format!(
+                "{entry} cannot be stored: the config reader treats \" #\" as a comment"
+            ));
+        }
+        let escaped = entry.replace('\\', "\\\\").replace(',', "\\,");
+        if !serialized.contains(&escaped) {
+            serialized.push(escaped);
+        }
+    }
+    Ok(serialized.join(","))
+}
+
+/// Writes `changes` into the hand-editable config file, leaving every other
+/// byte alone: comments, unknown keys and line endings survive. A key the user
+/// commented out is replaced in place rather than appended, so one setting
+/// never exists twice in the file.
+///
+/// An inline comment on a replaced line is dropped along with the old value it
+/// described. The file is replaced atomically, so a crash cannot leave half a
+/// config behind.
+pub fn write_settings(path: &Path, changes: &[(String, String)]) -> Result<(), String> {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(format!("could not read {}: {err}", path.display())),
+    };
+
+    // Split inclusively so the line endings are data: a CRLF file stays CRLF.
+    let segments: Vec<&str> = existing.split_inclusive('\n').collect();
+    // Which change rewrites which segment. Two passes, because the parser keeps
+    // the *last* assignment: if a commented-out line precedes the active one,
+    // replacing the comment would leave the old active value winning.
+    let mut rewrites: Vec<Option<usize>> = vec![None; segments.len()];
+
+    // Pass 1: the last active assignment of every key.
+    for (index, segment) in segments.iter().enumerate() {
+        let (body, _) = split_line_ending(segment);
+        let Some(key) = assigned_key(strip_comments(body)) else {
+            continue;
+        };
+        let Some(change) = changes.iter().position(|(candidate, _)| candidate == key) else {
+            continue;
+        };
+        for slot in rewrites.iter_mut() {
+            if *slot == Some(change) {
+                *slot = None;
+            }
+        }
+        rewrites[index] = Some(change);
+    }
+
+    // Pass 2: a key the user commented out is resurrected in place, so the same
+    // setting never exists twice in the file. Only when no active line matched.
+    for (index, segment) in segments.iter().enumerate() {
+        if rewrites[index].is_some() {
+            continue;
+        }
+        let (body, _) = split_line_ending(segment);
+        let Some(key) = commented_out_key(body) else {
+            continue;
+        };
+        let Some(change) = changes.iter().position(|(candidate, _)| candidate == key) else {
+            continue;
+        };
+        if rewrites.contains(&Some(change)) {
+            continue;
+        }
+        rewrites[index] = Some(change);
+    }
+
+    let mut output = String::with_capacity(existing.len() + 128);
+    for (index, segment) in segments.iter().enumerate() {
+        match rewrites[index] {
+            Some(change) => {
+                let (key, value) = &changes[change];
+                let (_, ending) = split_line_ending(segment);
+                output.push_str(key);
+                output.push('=');
+                output.push_str(value);
+                output.push_str(ending);
+            }
+            None => output.push_str(segment),
+        }
+    }
+
+    let pending: Vec<&(String, String)> = changes
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !rewrites.contains(&Some(*index)))
+        .map(|(_, change)| change)
+        .collect();
+
+    if !pending.is_empty() {
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        const MARKER: &str = "# Added by Zeidex Settings";
+        if !output.contains(MARKER) {
+            output.push_str(MARKER);
+            output.push('\n');
+        }
+        for (key, value) in pending {
+            output.push_str(key);
+            output.push('=');
+            output.push_str(value);
+            output.push('\n');
+        }
+    }
+
+    write_atomically(path, &output)
+}
+
+/// Splits one `split_inclusive('\n')` segment into its body and its exact line
+/// ending, so rewriting one line cannot convert the file between LF and CRLF.
+fn split_line_ending(segment: &str) -> (&str, &str) {
+    if let Some(body) = segment.strip_suffix("\r\n") {
+        (body, "\r\n")
+    } else if let Some(body) = segment.strip_suffix('\n') {
+        (body, "\n")
+    } else if let Some(body) = segment.strip_suffix('\r') {
+        (body, "\r")
+    } else {
+        (segment, "")
+    }
+}
+
+/// Replaces `path` with `contents` through a sibling temp file, so a crash or a
+/// full disk leaves the previous config intact instead of half of a new one.
+fn write_atomically(path: &Path, contents: &str) -> Result<(), String> {
+    // Write through a symlinked config rather than replacing the link with a
+    // regular file, which would silently detach a dotfile-managed setup.
+    let target = match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+        }
+        _ => path.to_path_buf(),
+    };
+    let parent = target
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)
+        .map_err(|err| format!("could not create {}: {err}", parent.display()))?;
+
+    let file_name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "config".to_string());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    let temporary = parent.join(format!(".{file_name}.tmp-{}-{stamp}", std::process::id()));
+
+    std::fs::write(&temporary, contents)
+        .map_err(|err| format!("could not write {}: {err}", temporary.display()))?;
+    // Copy the mode of the file being replaced: a 0600 config must not come
+    // back 0644 because it went through a temp file.
+    if let Ok(metadata) = std::fs::metadata(&target) {
+        let _ = std::fs::set_permissions(&temporary, metadata.permissions());
+    }
+    std::fs::rename(&temporary, &target).map_err(|err| {
+        let _ = std::fs::remove_file(&temporary);
+        format!("could not replace {}: {err}", target.display())
+    })
 }
 
 /// Where the config lives, migrating a legacy `~/.zeidex.config` into `~/.zeidex/`
@@ -427,8 +750,8 @@ fn default_config_contents() -> String {
     };
     format!(
         "# zeidex configuration\n\
-# Generated on first launch. Edit values, then reload with Cmd+Shift+;\n\
-# (Ctrl+Shift+; on Linux and Windows).\n\
+# Generated on first launch. Edit values, then restart Zeidex: the config is\n\
+# read once per process.\n\
 \n\
 # Backend indexing (file_scan_depth: 1-12, file_scan_limit: 500-50000)\n\
 app_scan_roots={app_roots}\n\
@@ -457,6 +780,15 @@ skip_dir_names=node_modules,target,build,dist,library,applications,old firefox d
 # Clipboard history size (10-1000). Out-of-range values fall back to 1000.\n\
 # Pinned clips are kept on top of this.\n\
 clipboard_history_limit=1000\n\
+# Refuse credential-shaped clips (private-key blocks, cloud/forge API tokens,\n\
+# JWTs) instead of writing them to the searchable history. false stores them.\n\
+clipboard_filter_secrets=true\n\
+\n\
+# Delete text clips last copied more than this many days ago (1-3650 days).\n\
+# 0, the default, keeps them until the history-size limit evicts them. Pinned\n\
+# clips are never deleted by age, and a value that is not a whole number in\n\
+# range is ignored rather than turned into a deletion.\n\
+clipboard_retention_days=0\n\
 \n\
 # How long the main query survives while Zeidex is hidden, in seconds. 0 clears\n\
 # it on every hide; a negative value keeps it indefinitely.\n\
@@ -1003,6 +1335,115 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
     }
 
+    /// The generated config documents this key, so it has to be read. It used to
+    /// be written and never parsed: the user set a history size and nothing
+    /// changed.
+    #[test]
+    fn clipboard_history_limit_is_loaded_and_out_of_range_values_fall_back() {
+        let tmp = std::env::temp_dir().join(format!(
+            "zeidex-config-test-clipboard-limit-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+
+        let mut config = RuntimeConfig::default();
+        assert_eq!(config.clipboard_history_limit, 1000);
+
+        std::fs::write(&tmp, "clipboard_history_limit=250\n").expect("write config");
+        config.apply_from_file(&tmp);
+        assert_eq!(config.clipboard_history_limit, 250);
+
+        // Below and above the documented range: the default, not a clamp.
+        std::fs::write(&tmp, "clipboard_history_limit=3\n").expect("write config");
+        config.apply_from_file(&tmp);
+        assert_eq!(config.clipboard_history_limit, 1000);
+
+        std::fs::write(&tmp, "clipboard_history_limit=many\n").expect("write config");
+        config.apply_from_file(&tmp);
+        assert_eq!(config.clipboard_history_limit, 1000);
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// The generated config documents this key, so it has to be read. Its
+    /// fallback is the opposite of the secret filter's: a value the app cannot
+    /// understand must start deleting nothing.
+    #[test]
+    fn clipboard_retention_days_is_loaded_and_a_typo_never_enables_it() {
+        let tmp = std::env::temp_dir().join(format!(
+            "zeidex-config-test-clipboard-retention-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+
+        let mut config = RuntimeConfig::default();
+        assert_eq!(config.clipboard_retention_days, 0);
+
+        std::fs::write(&tmp, "clipboard_retention_days=30\n").expect("write config");
+        config.apply_from_file(&tmp);
+        assert_eq!(config.clipboard_retention_days, 30);
+
+        // 0 is the documented "keep until the size limit evicts them".
+        std::fs::write(&tmp, "clipboard_retention_days=0\n").expect("write config");
+        config.apply_from_file(&tmp);
+        assert_eq!(config.clipboard_retention_days, 0);
+
+        // Above the ceiling, negative, and prose all fall back to 0. The value
+        // is reset first so a parser that simply skipped the line would fail.
+        for value in ["3651", "-7", "soon"] {
+            config.clipboard_retention_days = 30;
+            std::fs::write(&tmp, format!("clipboard_retention_days={value}\n"))
+                .expect("write config");
+            config.apply_from_file(&tmp);
+            assert_eq!(
+                config.clipboard_retention_days, 0,
+                "{value} should not enable retention"
+            );
+        }
+
+        assert!(default_config_contents().contains("clipboard_retention_days=0"));
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// The generated config documents this key, so it has to be parsed. It is
+    /// also the switch behind a privacy default, so a malformed value must not
+    /// silently turn the filter off.
+    #[test]
+    fn clipboard_secret_filter_is_loaded_and_defaults_on() {
+        let tmp = std::env::temp_dir().join(format!(
+            "zeidex-config-test-clipboard-secrets-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+
+        assert!(RuntimeConfig::default().clipboard_filter_secrets);
+
+        std::fs::write(&tmp, "clipboard_filter_secrets=false\n").expect("write config");
+        let mut config = RuntimeConfig::default();
+        config.apply_from_file(&tmp);
+        assert!(!config.clipboard_filter_secrets);
+
+        std::fs::write(&tmp, "clipboard_filter_secrets=maybe\n").expect("write config");
+        let mut config = RuntimeConfig::default();
+        config.apply_from_file(&tmp);
+        assert!(
+            config.clipboard_filter_secrets,
+            "malformed must keep the safe default"
+        );
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
     #[test]
     fn default_config_contents_include_lazy_indexing_enabled() {
         assert!(default_config_contents().contains("lazy_indexing_enabled=true"));
@@ -1497,5 +1938,249 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    // ------------------------------------------------------- settings writes
+
+    fn temp_settings_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "zeidex-settings-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn canonical_setting_enforces_the_documented_ranges() {
+        for (key, value) in [
+            ("file_scan_depth", 1),
+            ("file_scan_depth", 12),
+            ("file_scan_limit", 500),
+            ("file_scan_limit", 50_000),
+            ("clipboard_history_limit", 10),
+            ("clipboard_history_limit", 1000),
+            ("clipboard_retention_days", 0),
+            ("clipboard_retention_days", MAX_CLIPBOARD_RETENTION_DAYS),
+        ] {
+            assert!(
+                canonical_setting(key, SettingValue::Integer(value)).is_ok(),
+                "{key}={value} should be accepted"
+            );
+        }
+
+        for (key, value) in [
+            ("file_scan_depth", 0),
+            ("file_scan_depth", 13),
+            ("file_scan_limit", 499),
+            ("file_scan_limit", 50_001),
+            ("clipboard_history_limit", 9),
+            ("clipboard_history_limit", 1001),
+            ("clipboard_retention_days", MAX_CLIPBOARD_RETENTION_DAYS + 1),
+        ] {
+            assert!(
+                canonical_setting(key, SettingValue::Integer(value)).is_err(),
+                "{key}={value} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_setting_rejects_unknown_keys_and_wrong_types() {
+        // Keys that exist elsewhere but are not writable from the UI must be
+        // refused rather than appended as lines the parser treats as unknown.
+        assert!(canonical_setting("query_retention_seconds", SettingValue::Bool(true)).is_err());
+        assert!(canonical_setting("alias_note", SettingValue::Bool(true)).is_err());
+        assert!(canonical_setting("clipboard_filter_secrets", SettingValue::Integer(1)).is_err());
+        assert!(canonical_setting("file_scan_depth", SettingValue::PathList(&[])).is_err());
+        assert!(
+            canonical_setting("lazy_indexing_enabled", SettingValue::Bool(false))
+                .expect("boolean setting")
+                == "false"
+        );
+    }
+
+    #[test]
+    fn write_settings_replaces_in_place_and_preserves_the_rest() {
+        let path = temp_settings_path("in-place");
+        let original = "# kept comment\r\n\
+file_scan_depth=4\r\n\
+unknown_key=keep me\r\n\
+clipboard_filter_secrets=true\r\n";
+        std::fs::write(&path, original).expect("seed config");
+
+        write_settings(
+            &path,
+            &[
+                ("file_scan_depth".to_string(), "6".to_string()),
+                ("clipboard_filter_secrets".to_string(), "false".to_string()),
+            ],
+        )
+        .expect("write settings");
+
+        let written = std::fs::read_to_string(&path).expect("read config");
+        assert_eq!(
+            written,
+            "# kept comment\r\n\
+file_scan_depth=6\r\n\
+unknown_key=keep me\r\n\
+clipboard_filter_secrets=false\r\n",
+            "comments, unknown keys and CRLF endings must survive the edit"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_settings_resurrects_a_commented_key_without_duplicating_it() {
+        let path = temp_settings_path("resurrect");
+        std::fs::write(
+            &path,
+            "lazy_indexing_enabled=false\n# clipboard_filter_secrets=false\n",
+        )
+        .expect("seed config");
+
+        write_settings(
+            &path,
+            &[("clipboard_filter_secrets".to_string(), "true".to_string())],
+        )
+        .expect("write settings");
+
+        let written = std::fs::read_to_string(&path).expect("read config");
+        assert_eq!(
+            written,
+            "lazy_indexing_enabled=false\nclipboard_filter_secrets=true\n"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_settings_targets_the_line_the_parser_actually_reads() {
+        let path = temp_settings_path("last-wins");
+        // The commented line comes first; the active one is what the parser
+        // honours. Replacing the comment would leave the stale value in force.
+        std::fs::write(&path, "# file_scan_depth=2\nfile_scan_depth=4\n").expect("seed config");
+
+        write_settings(&path, &[("file_scan_depth".to_string(), "9".to_string())])
+            .expect("write settings");
+
+        let written = std::fs::read_to_string(&path).expect("read config");
+        assert_eq!(written, "# file_scan_depth=2\nfile_scan_depth=9\n");
+
+        let mut config = RuntimeConfig::default();
+        config.apply_from_file(&path);
+        assert_eq!(config.file_scan_depth, 9);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_settings_appends_a_missing_key_once() {
+        let path = temp_settings_path("append");
+        // No trailing newline: the appended block must not run into the last line.
+        std::fs::write(&path, "file_scan_depth=4").expect("seed config");
+
+        write_settings(
+            &path,
+            &[("clipboard_retention_days".to_string(), "30".to_string())],
+        )
+        .expect("first write");
+        let first = std::fs::read_to_string(&path).expect("read config");
+        assert_eq!(
+            first,
+            "file_scan_depth=4\n# Added by Zeidex Settings\nclipboard_retention_days=30\n"
+        );
+
+        write_settings(
+            &path,
+            &[("clipboard_retention_days".to_string(), "7".to_string())],
+        )
+        .expect("second write");
+        let second = std::fs::read_to_string(&path).expect("read config");
+        assert_eq!(second.matches("clipboard_retention_days=").count(), 1);
+        assert_eq!(second.matches("# Added by Zeidex Settings").count(), 1);
+        assert!(second.contains("clipboard_retention_days=7\n"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn write_settings_creates_a_missing_file_and_its_parent() {
+        let directory = temp_settings_path("fresh-dir");
+        let path = directory.join("nested").join("config");
+
+        write_settings(&path, &[("file_scan_depth".to_string(), "5".to_string())])
+            .expect("create config");
+
+        let written = std::fs::read_to_string(&path).expect("read config");
+        assert_eq!(written, "# Added by Zeidex Settings\nfile_scan_depth=5\n");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn written_settings_are_read_back_by_the_parser() {
+        let path = temp_settings_path("round-trip");
+        let documents = std::env::temp_dir().join("zeidex-settings-documents");
+        let with_comma = std::env::temp_dir().join("zeidex-settings-a,b");
+        let roots = vec![
+            documents.to_string_lossy().into_owned(),
+            with_comma.to_string_lossy().into_owned(),
+        ];
+
+        write_settings(
+            &path,
+            &[
+                (
+                    "file_scan_depth".to_string(),
+                    canonical_setting("file_scan_depth", SettingValue::Integer(7))
+                        .expect("valid depth"),
+                ),
+                ("file_scan_limit".to_string(), "12000".to_string()),
+                ("clipboard_history_limit".to_string(), "250".to_string()),
+                ("clipboard_retention_days".to_string(), "45".to_string()),
+                ("clipboard_filter_secrets".to_string(), "false".to_string()),
+                ("lazy_indexing_enabled".to_string(), "false".to_string()),
+                (
+                    "file_scan_extra_roots".to_string(),
+                    canonical_setting("file_scan_extra_roots", SettingValue::PathList(&roots))
+                        .expect("valid roots"),
+                ),
+            ],
+        )
+        .expect("write settings");
+
+        let mut config = RuntimeConfig::default();
+        config.apply_from_file(&path);
+        assert_eq!(config.file_scan_depth, 7);
+        assert_eq!(config.file_scan_limit, 12_000);
+        assert_eq!(config.clipboard_history_limit, 250);
+        assert_eq!(config.clipboard_retention_days, 45);
+        assert!(!config.clipboard_filter_secrets);
+        assert!(!config.lazy_indexing_enabled);
+        assert_eq!(config.file_scan_extra_roots, roots);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn path_list_escape_round_trips_and_refuses_unrepresentable_values() {
+        let comma = vec!["/tmp/a,b".to_string()];
+        let serialized = canonical_setting("file_scan_extra_roots", SettingValue::PathList(&comma))
+            .expect("a comma is escapable");
+        assert_eq!(serialized, "/tmp/a\\,b");
+        assert_eq!(parse_csv(&serialized), comma);
+
+        // A line break would start a new config line, and ` #` would truncate
+        // the value: both are refused instead of stored as something else.
+        let newline = vec!["/tmp/line\nbreak".to_string()];
+        assert!(
+            canonical_setting("file_scan_extra_roots", SettingValue::PathList(&newline)).is_err()
+        );
+        let comment = vec!["/tmp/with #hash".to_string()];
+        assert!(
+            canonical_setting("file_scan_extra_roots", SettingValue::PathList(&comment)).is_err()
+        );
+        let blank = vec!["  ".to_string()];
+        assert!(
+            canonical_setting("file_scan_extra_roots", SettingValue::PathList(&blank)).is_err()
+        );
     }
 }

@@ -308,7 +308,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-px bg-white/[0.06] lg:grid-cols-2">
           <section className="flex min-h-0 flex-col gap-2.5 bg-ink-950/60 p-4">
             <div className="flex items-center gap-2">
-              <h2 className="flex items-center gap-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <h2 className="flex items-center gap-1.5 text-[0.62rem] font-semibold micro-label tracking-[0.18em] text-zinc-500">
                 <Icon name="eye" size={12} />
                 {rtl ? "الصفحة" : "Page"}
               </h2>
@@ -387,7 +387,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
 
           <section className="flex min-h-0 flex-col gap-2.5 bg-ink-950/60 p-4">
             <div className="flex items-center gap-2">
-              <h2 className="flex items-center gap-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <h2 className="flex items-center gap-1.5 text-[0.62rem] font-semibold micro-label tracking-[0.18em] text-zinc-500">
                 <Icon name="text" size={12} />
                 {rtl ? "النص المستخرج" : "Extracted text"}
               </h2>
@@ -424,7 +424,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                     ? "صور و PDF تُقرأ محليًا: تخطيط، أسطر، جداول، ثم نص قابل للتحرير والتصدير إلى Word و Excel."
                     : "Images and PDFs are read on-device — layout, lines, tables — then exported as editable Word and Excel files."}
                 </p>
-                <div className="mt-1 flex items-center gap-1.5 text-[0.6rem] uppercase tracking-[0.16em] text-zinc-600">
+                <div className="mt-1 flex items-center gap-1.5 text-[0.6rem] micro-label tracking-[0.16em] text-zinc-600">
                   <Icon name="lock" size={11} />
                   {rtl ? "بلا شبكة" : "No network"}
                 </div>

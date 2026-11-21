@@ -111,7 +111,7 @@ One input, four modes. <kbd>Tab</kbd> cycles the filter, <kbd>↑</kbd>/<kbd>↓
 | --- | --- |
 | **Search** | Fuzzy matching with accent/case folding, alias groups (`alias_code=Visual Studio Code\|Cursor\|Zed`), and a usage-aware re-rank so the thing you open every morning wins ties. |
 | **Calculator** | Type an expression and it is evaluated as you type. <kbd>Enter</kbd> copies the raw, re-parseable number — not the prettified `1,000,000`. |
-| **Clipboard history** | Every text clip is stored locally in SQLite, de-duplicated, searchable, pinnable, and never expires unless you say so. |
+| **Clipboard history** | Every text clip is stored locally in SQLite, de-duplicated, searchable, pinnable, and never expires unless you say so. Images are not captured: copying a screenshot leaves the history unchanged. |
 | **Translation** | `tr"` followed by text translates into Arabic, English, French and Spanish. Each target fails independently, so one rate-limited request cannot break the panel. |
 | **Web search / URLs** | Type a URL to open it, or a phrase to search the web in your default browser. |
 | **Preferences** | Preferred editor and terminal are resolved per platform, so “open in editor” means the right editor. |
@@ -136,6 +136,25 @@ Keyboard reference:
     <td align="center"><sub>Calculator: <kbd>Enter</kbd> copies the raw value.</sub></td>
     <td align="center"><sub>Clipboard: pinned clips survive the retention sweep.</sub></td>
     <td align="center"><sub>Translation: four targets, each failing on its own.</sub></td>
+  </tr>
+</table>
+
+### Settings
+
+The gear opens a panel that edits local-only state: indexing depth and extra
+roots, clipboard size and retention, the secret filter, the web-search
+preference, interface direction, and the copyable diagnostics in About &amp;
+Diagnostics. Changes take effect on **Save**, and out-of-range numbers are refused
+inline instead of being clamped behind your back.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/settings-clipboard.png" alt="Clipboard settings: recording, history size, retention and secret filtering" /></td>
+    <td width="50%"><img src="assets/screenshots/settings-arabic.png" alt="Settings in Arabic, right to left" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Clipboard: size, age, credential skipping, and a deliberate pause.</sub></td>
+    <td align="center"><sub>Arabic mirrors the whole panel and keeps content in logical order.</sub></td>
   </tr>
 </table>
 
@@ -246,7 +265,7 @@ make core-test     # the whole Rust workspace
 make core-fmt      # formatting
 make core-clippy   # clippy, unwrap/expect denied in production paths
 make frontend-build
-make ocr-test      # real models, real page — needs ORT_DYLIB_PATH
+make ocr-test      # real models: OCR, table grid, accuracy, PDF, Word/Excel export (ORT_DYLIB_PATH)
 ```
 
 ## Usage
@@ -332,8 +351,9 @@ why the OCR and export logic can be tested in CI on two operating systems.
   tables can lose a row or column. The cells are editable, so a wrong split is fixable,
   not fatal.
 - **OCR is CPU-bound.** A 300 dpi A4 page takes several seconds on a laptop and minutes
-  for a 40-page PDF. Detection caps the long side at 1600 px by default
-  (`OcrEngineConfig::det_max_side`) so memory stays bounded on long documents.
+  for a 40-page PDF. Detection caps the long side at 2400 px by default
+  (`OcrEngineConfig::det_max_side`) so memory stays bounded on long documents while
+  small table digits survive the downscale.
 - **Runtime libraries are not committed.** ONNX Runtime and pdfium are loaded
   dynamically; release bundles stage them, while a source build needs them in
   `src-tauri/resources/lib/` or on the system loader path.

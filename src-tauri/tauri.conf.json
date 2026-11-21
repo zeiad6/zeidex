@@ -44,7 +44,15 @@
     "longDescription": "Zeidex Studio is a cross-platform launcher and offline document AI: fuzzy app, file and folder search, clipboard history, an inline calculator, translation, and a document studio that turns scans and PDFs into editable Word and Excel files. No account, no telemetry, and no cloud OCR.",
     "linux": {
       "deb": {
-        "section": "utils"
+        "section": "utils",
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0 | libgtk-3-0t64",
+          "libayatana-appindicator3-1"
+        ],
+        "files": {
+          "/usr/share/metainfo/com.zeidexsoft.zeidex.metainfo.xml": "appstream/com.zeidexsoft.zeidex.metainfo.xml"
+        }
       }
     },
     "targets": [

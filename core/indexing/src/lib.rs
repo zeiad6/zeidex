@@ -447,10 +447,4 @@ impl Default for Candidate {
 
 pub trait Source {
     fn collect(&self, tx: mpsc::SyncSender<Candidate>);
-
-    fn collect_vec(&self) -> Vec<Candidate> {
-        let (tx, rx) = mpsc::sync_channel(1024);
-        self.collect(tx);
-        rx.into_iter().collect()
-    }
 }

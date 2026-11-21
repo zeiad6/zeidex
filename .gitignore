@@ -115,3 +115,4 @@ apps/linows/LINUX-REVIEW.md
 src-tauri/resources/lib/*.so
 src-tauri/resources/lib/*.dylib
 src-tauri/resources/lib/*.dll
+.test-build/

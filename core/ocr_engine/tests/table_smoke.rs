@@ -5,6 +5,8 @@
 //! structure head is a *sequence* decoder: a regression that treats every one of
 //! the 501 positions as a cell is invisible to unit tests but obvious here.
 
+use std::path::Path;
+
 use image::GenericImageView;
 
 use zeidex_ocr::error::OcrResult;
@@ -52,6 +54,19 @@ fn slanet_decodes_a_real_table_into_a_clean_grid() -> OcrResult<()> {
     // The fixture is a 4-row x 3-column grid (header + 3 data rows).
     assert!(structure.rows >= 2, "no rows decoded");
     assert!(structure.cols >= 2, "no columns decoded");
+    // The fixture is a 4-row x 3-column grid (header + 3 data rows). Assert the
+    // exact shape for that fixture: a 2-column decode was the symptom of
+    // stretching the crop to a square instead of padding it, and it silently
+    // left the middle column's text without a cell.
+    if Path::new(&image_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        == Some("table.png")
+    {
+        assert_eq!(structure.rows, 4, "fixture has four rows");
+        assert_eq!(structure.cols, 3, "fixture has three columns");
+        assert_eq!(structure.cells.len(), 12, "fixture has twelve cells");
+    }
     // The bug this test guards: structural tokens must not become cells.
     assert!(
         structure.cells.len() <= structure.rows * structure.cols,

@@ -14,7 +14,16 @@ pub struct AppState {
     /// Last text seen by the clipboard poller. Clipboard APIs have no change
     /// event, so the shell polls; without this guard every poll would re-record
     /// the same clip and inflate its copy count.
+    ///
+    /// Lock order: `last_clipboard` is always taken before `store`, never after.
+    /// The poller holds it from the pasteboard read through the write, so a
+    /// pause, a resume or a history wipe cannot interleave with it.
     pub last_clipboard: Mutex<Option<String>>,
+    /// Set when a resume could not read the pasteboard. The next clip the poller
+    /// sees is taken as the watermark and not written: without the current
+    /// value it cannot tell a clip copied before the resume from one copied
+    /// after, and losing one clip is the safe side of that doubt.
+    pub clipboard_skip_next: std::sync::atomic::AtomicBool,
     /// Lazily loaded OCR engine. `OcrEngine` is `Send + Sync`, so the `Arc` is
     /// cloned into blocking tasks.
     pub ocr: Mutex<Option<std::sync::Arc<OcrEngine>>>,
@@ -29,12 +38,40 @@ impl AppState {
         models_dir: PathBuf,
         pdfium_library: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
-        let store = SqliteStore::open(&db_path)?;
-        let engine = QueryEngine::from_sqlite(&db_path).unwrap_or_default();
+        // A corrupt database file used to abort startup entirely. Recovery keeps
+        // the unreadable file beside the fresh one instead of failing the app.
+        let mut store = SqliteStore::open_or_recover(&db_path)?;
+        // The generated config documents this limit, so honour it. Clamped again
+        // inside the store, which is the layer that actually prunes. Pruning runs
+        // here, at startup, so a lowered limit applies to rows from last session
+        // too.
+        let config = zeidex_engine::config::RuntimeConfig::load_cached();
+        // A retention limit that cannot be applied must not stop the launcher
+        // from starting: the new cap is stored before the prune runs, so every
+        // later copy still enforces it, and the failure is reported rather than
+        // hidden. Nothing has been deleted, so there is nothing to lose.
+        if let Err(err) = store.set_clipboard_text_cap(config.clipboard_history_limit) {
+            eprintln!("zeidex: could not apply the clipboard history limit: {err}");
+        }
+        // Age retention is opt-in (0 = off). Applied at startup for the same
+        // reason as the size cap: a user who enables it wants yesterday's clips
+        // gone now, not after their next copy. A failure is reported, not fatal.
+        if let Err(err) = store.set_clipboard_retention_days(config.clipboard_retention_days) {
+            eprintln!("zeidex: could not apply the clipboard retention limit: {err}");
+        }
+        store.set_clipboard_filter_secrets(config.clipboard_filter_secrets);
+        // A failure here means the index could not be read even though the store
+        // opened. Starting empty keeps the launcher usable, but the reason must
+        // not vanish: without it, "no results" is the only symptom.
+        let engine = QueryEngine::from_sqlite(&db_path).unwrap_or_else(|err| {
+            eprintln!("zeidex: could not load the search index: {err}");
+            QueryEngine::default()
+        });
         Ok(Self {
             engine: Mutex::new(engine),
             store: Mutex::new(store),
             last_clipboard: Mutex::new(None),
+            clipboard_skip_next: std::sync::atomic::AtomicBool::new(false),
             ocr: Mutex::new(None),
             models_dir,
             pdfium_library,

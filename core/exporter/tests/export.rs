@@ -1,13 +1,16 @@
 //! Round-trip tests: build a page layout, export it, then open the resulting
 //! Office package and assert the XML carries the structure we promised.
 
+// Tests are allowed to fail loudly: the crate deny-list applies to shipped code.
+#![allow(clippy::expect_used)]
+
 use std::io::Read;
 use std::path::Path;
 
 use zeidex_exporter::{docx, xlsx};
 use zeidex_ocr::geometry::BBox;
 use zeidex_ocr::layout::{PageLayout, Region, RegionKind};
-use zeidex_ocr::pipeline::PageResult;
+use zeidex_ocr::pipeline::{OcrEngine, OcrEngineConfig, PageResult};
 use zeidex_ocr::table::TableStructure;
 use zeidex_ocr::table::reconstruct;
 
@@ -164,6 +167,117 @@ fn page_with(index: usize, text: &str) -> PageResult {
     }
 }
 
+fn page_with_table(title: &str, first_cell: &str, second_cell: &str) -> PageResult {
+    let row = BBox::new(0.0, 0.0, 100.0, 20.0);
+    let col = |x0: f32, x1: f32| BBox::new(x0, 0.0, x1, 20.0);
+    let mut structure = reconstruct(
+        BBox::new(0.0, 0.0, 100.0, 20.0),
+        &[row, row],
+        &[col(0.0, 50.0), col(50.0, 100.0)],
+        &[(0, 0, 1, 2)],
+    );
+    structure.cells[0].text = first_cell.to_string();
+    structure.cells[1].text = second_cell.to_string();
+
+    PageResult {
+        page_index: 0,
+        width: 200,
+        height: 100,
+        layout: PageLayout {
+            width: 200,
+            height: 100,
+            regions: vec![
+                Region {
+                    kind: RegionKind::Title,
+                    bbox: BBox::new(0.0, 0.0, 100.0, 20.0),
+                    confidence: 0.9,
+                    text: Some(title.to_string()),
+                    table: None,
+                },
+                Region {
+                    kind: RegionKind::Table,
+                    bbox: BBox::new(0.0, 20.0, 100.0, 40.0),
+                    confidence: 0.99,
+                    text: None,
+                    table: Some(structure),
+                },
+            ],
+        },
+        text: String::new(),
+    }
+}
+
+#[test]
+fn docx_marks_an_arabic_table_right_to_left() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("rtl-table.docx");
+    let page = page_with_table("تقرير المبيعات", "الاسم", "1,234.50");
+    docx::export_docx(&page, &path).expect("export docx");
+
+    let document = zip_entry(&path, "word/document.xml");
+    // `bidiVisual` is the property that makes Word lay the columns out
+    // right-to-left; without it an Arabic table exports mirrored.
+    assert!(
+        document.contains("<w:tblPr><w:bidiVisual />"),
+        "table is not marked right-to-left: {document}"
+    );
+}
+
+#[test]
+fn docx_leaves_a_latin_table_left_to_right() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("ltr-table.docx");
+    let page = page_with_table("Quarterly report", "Item", "1,234.50");
+    docx::export_docx(&page, &path).expect("export docx");
+
+    let document = zip_entry(&path, "word/document.xml");
+    assert!(
+        !document.contains("<w:bidiVisual"),
+        "a Latin table must keep Word's default column order: {document}"
+    );
+}
+
+#[test]
+fn docx_tie_keeps_the_default_direction() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("mixed-table.docx");
+    // One English heading and one Arabic label: a tie must stay left-to-right,
+    // and the Arabic cell itself still reads right-to-left.
+    let page = page_with_table("Report", "Item", "الصنف");
+    docx::export_docx(&page, &path).expect("export docx");
+
+    let document = zip_entry(&path, "word/document.xml");
+    assert!(
+        !document.contains("<w:bidiVisual"),
+        "a tied table must keep Word's default column order: {document}"
+    );
+    assert!(
+        document.contains("الصنف"),
+        "the Arabic cell text must survive: {document}"
+    );
+}
+
+#[test]
+fn docx_rewrite_keeps_every_package_entry_readable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("intact.docx");
+    docx::export_docx(&page(), &path).expect("export docx");
+
+    // The table-direction pass rewrites the whole zip, so the other parts have
+    // to come through unchanged and still be readable.
+    for entry in [
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "word/document.xml",
+        "word/styles.xml",
+    ] {
+        assert!(
+            !zip_entry(&path, entry).is_empty(),
+            "package entry {entry} is missing or empty after the rewrite"
+        );
+    }
+}
+
 #[test]
 fn docx_export_pages_keeps_every_page_and_breaks_between_them() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -251,5 +365,78 @@ fn xlsx_stacks_two_tables_on_one_sheet_without_colliding() {
     assert_ne!(
         top, bottom,
         "second table overwrote the first: both in cell {top}"
+    );
+}
+
+/// The whole real-model path: OCR the table fixture, then export the page that
+/// came out of the engine. This is the join the unit tests above cannot see —
+/// a page can be exported correctly and still be empty because recognition
+/// filled nothing.
+#[test]
+fn ocr_output_exports_to_word_and_excel() {
+    let Ok(models_dir) = std::env::var("ZEIDEX_TEST_MODELS_DIR") else {
+        eprintln!("skipping: ZEIDEX_TEST_MODELS_DIR not set");
+        return;
+    };
+    let Ok(image_path) = std::env::var("ZEIDEX_TEST_IMAGE") else {
+        eprintln!("skipping: ZEIDEX_TEST_IMAGE not set");
+        return;
+    };
+    if Path::new(&image_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        != Some("table.png")
+    {
+        eprintln!("skipping: fixture is not table.png");
+        return;
+    }
+
+    let engine = OcrEngine::new(OcrEngineConfig {
+        models_dir: models_dir.into(),
+        ..OcrEngineConfig::default()
+    })
+    .expect("load OCR models");
+    let page = engine
+        .process_image(Path::new(&image_path))
+        .expect("OCR the fixture");
+
+    let table = page
+        .layout
+        .regions
+        .iter()
+        .find(|region| region.kind == RegionKind::Table)
+        .expect("layout has a table region");
+    let structure = table.table.as_ref().expect("table region has a grid");
+    assert!(
+        structure
+            .cells
+            .iter()
+            .any(|cell| !cell.text.trim().is_empty()),
+        "OCR produced a table with no cell text"
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let docx_path = dir.path().join("ocr.docx");
+    docx::export_docx(&page, &docx_path).expect("export docx");
+    let body = zip_entry(&docx_path, "word/document.xml");
+    assert!(body.contains("<w:tbl>"), "Word export has no table");
+    assert!(
+        body.contains("Quantity"),
+        "Word export lost recognized text: {body}"
+    );
+
+    let xlsx_path = dir.path().join("ocr.xlsx");
+    xlsx::export_xlsx(&page, &xlsx_path).expect("export xlsx");
+    let sheet = "xl/worksheets/sheet1.xml";
+    let quantity = cell_ref_of(&xlsx_path, sheet, "Quantity");
+    assert!(
+        quantity.is_some(),
+        "Excel export lost the recognized header; shared strings were not written"
+    );
+    assert!(
+        shared_index(&xlsx_path, "Gadget C").is_some()
+            || shared_index(&xlsx_path, "Widget A").is_some(),
+        "Excel export lost recognized body cells"
     );
 }

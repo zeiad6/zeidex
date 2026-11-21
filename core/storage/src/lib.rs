@@ -5,6 +5,8 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zeidex_indexing::{Candidate, CandidateKind};
 
+mod secrets;
+
 const SEARCH_ENGINE_DUCKDUCKGO: &str = "duckduckgo";
 const SEARCH_ENGINE_GOOGLE: &str = "google";
 const SEARCH_ENGINE_BING: &str = "bing";
@@ -22,12 +24,30 @@ pub const MAX_CLIPBOARD_ROWS: usize = 5_000;
 /// Capped far lower than text, and separately: each row is megabytes on disk,
 /// and a screenshot burst must not evict text under a shared cap.
 pub const MAX_CLIPBOARD_IMAGE_ROWS: usize = 50;
+/// Documented ceiling for `clipboard_retention_days` (ten years). The config
+/// parser rejects anything above it, so a typo cannot become "delete everything
+/// older than 100,000 days"; the setter clamps for programmatic callers, which
+/// also keeps the cutoff arithmetic clear of overflow.
+pub const MAX_CLIPBOARD_RETENTION_DAYS: u32 = 3_650;
+/// A single clip larger than this is not stored at all.
+///
+/// A 40 MB log pasted into a text editor is still on the pasteboard, and
+/// recording it would write 40 MB into a history database the user thinks of as
+/// small, hash it on every poll, and hand it to the renderer on every list.
+/// 256 KiB holds ordinary prose many times over (about 130k Arabic characters),
+/// so the cap only ever rejects machine-sized payloads. Truncating instead would
+/// corrupt the clip; dropping it leaves the real pasteboard untouched.
+pub const MAX_CLIPBOARD_ENTRY_BYTES: usize = 256 * 1024;
+/// Lower bound for a user-chosen history size: fewer than this is a paste ring,
+/// not a history the launcher can search.
+const MIN_CLIPBOARD_ROWS: usize = 10;
 
 pub const CLIPBOARD_KIND_TEXT: &str = "text";
 pub const CLIPBOARD_KIND_IMAGE: &str = "image";
 
 const SETTINGS_KEY_WEB_SEARCH_ENABLED: &str = "web_search_enabled";
 const SETTINGS_KEY_WEB_SEARCH_ENGINE: &str = "web_search_engine";
+const SETTINGS_KEY_CLIPBOARD_PAUSED: &str = "clipboard_paused";
 const SETTINGS_TRUE: &str = "true";
 const SETTINGS_FALSE: &str = "false";
 
@@ -65,6 +85,69 @@ impl Display for StorageError {
 }
 
 impl std::error::Error for StorageError {}
+
+impl StorageError {
+    /// True only for SQLite's "this file is not a database" family, which is
+    /// the case where the file itself is unusable rather than merely busy.
+    fn is_corruption(&self) -> bool {
+        use rusqlite::ErrorCode;
+        matches!(
+            self,
+            StorageError::Sql(rusqlite::Error::SqliteFailure(err, _))
+                if err.code == ErrorCode::DatabaseCorrupt || err.code == ErrorCode::NotADatabase
+        )
+    }
+}
+
+/// `notes.db` + `-wal` → `notes.db-wal`, built on the OS string so a non-UTF-8
+/// path is not mangled by `to_string_lossy`.
+fn sibling_with_suffix(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    std::path::PathBuf::from(name)
+}
+
+/// Deletes the rows older than the `cap` newest unpinned rows of `kind` and
+/// returns how many went away.
+///
+/// A single statement, so it is atomic on its own: used both inside the copy
+/// transaction and by `set_clipboard_text_cap`, where there is no transaction to
+/// join. Fewer than `cap` matching rows means the subquery is empty, the row
+/// comparison yields NULL, and nothing is deleted - which is the right answer.
+fn prune_clipboard(conn: &Connection, kind: &str, cap: usize) -> StorageResult<usize> {
+    Ok(conn.execute(
+        "DELETE FROM clipboard_entries
+         WHERE kind = ?1 AND pinned = 0 AND (copied_at_unix_s, id) < (
+           SELECT copied_at_unix_s, id FROM clipboard_entries
+           WHERE kind = ?1 AND pinned = 0
+           ORDER BY copied_at_unix_s DESC, id DESC
+           LIMIT 1 OFFSET ?2
+         )",
+        params![kind, cap.saturating_sub(1) as i64],
+    )?)
+}
+
+/// Deletes unpinned text clips last copied more than `days` days ago and returns
+/// how many went away. `0` means "no age limit" and deletes nothing.
+///
+/// Age is measured from `copied_at_unix_s` - the last copy - so re-copying a
+/// clip keeps it, which is what "keep what I use" means to a user. Pinned rows
+/// are exempt for the same reason as in [`prune_clipboard`].
+///
+/// Text only on purpose: an image row owns a file whose lifecycle the shell
+/// manages, and this layer must not delete the row and leave the bytes behind.
+fn prune_clipboard_by_age(conn: &Connection, days: u32, now: i64) -> StorageResult<usize> {
+    if days == 0 {
+        return Ok(0);
+    }
+    // `days` is clamped at the setter, so this product cannot overflow.
+    let cutoff = now.saturating_sub(i64::from(days) * 86_400);
+    Ok(conn.execute(
+        "DELETE FROM clipboard_entries
+         WHERE kind = ?1 AND pinned = 0 AND copied_at_unix_s < ?2",
+        params![CLIPBOARD_KIND_TEXT, cutoff],
+    )?)
+}
 
 impl From<std::io::Error> for StorageError {
     fn from(value: std::io::Error) -> Self {
@@ -111,6 +194,17 @@ pub struct ClipboardEntry {
 
 pub struct SqliteStore {
     conn: Connection,
+    /// How many unpinned text clips are kept. The user's
+    /// `clipboard_history_limit` lands here; the hard ceiling is
+    /// `MAX_CLIPBOARD_ROWS` so a bad config cannot grow the table without bound.
+    clipboard_text_cap: usize,
+    /// Whether clips that look like credentials are refused. Default on: see
+    /// `secrets::looks_like_secret` for the (narrow) patterns.
+    clipboard_filter_secrets: bool,
+    /// Delete unpinned text clips older than this many days. `0` (the default)
+    /// means no age limit, so the upgrade path keeps everything the size cap
+    /// already keeps.
+    clipboard_retention_days: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,6 +215,7 @@ pub enum SearchEngine {
 }
 
 impl SearchEngine {
+    /// The stored spelling of this engine. Round-trips through `from_key`.
     pub fn key(self) -> &'static str {
         match self {
             SearchEngine::DuckDuckGo => SEARCH_ENGINE_DUCKDUCKGO,
@@ -129,13 +224,42 @@ impl SearchEngine {
         }
     }
 
-    pub fn from_key(value: &str) -> Self {
-        match value {
-            SEARCH_ENGINE_DUCKDUCKGO => SearchEngine::DuckDuckGo,
-            SEARCH_ENGINE_GOOGLE => SearchEngine::Google,
-            SEARCH_ENGINE_BING => SearchEngine::Bing,
-            _ => SearchEngine::Google,
+    /// Every engine, in the order the settings UI lists them.
+    pub fn all() -> [SearchEngine; 3] {
+        [
+            SearchEngine::Google,
+            SearchEngine::DuckDuckGo,
+            SearchEngine::Bing,
+        ]
+    }
+
+    /// The engine's name as a person writes it. `key` is the storage form; this
+    /// is the one that goes in a result row.
+    pub fn label(self) -> &'static str {
+        match self {
+            SearchEngine::DuckDuckGo => "DuckDuckGo",
+            SearchEngine::Google => "Google",
+            SearchEngine::Bing => "Bing",
         }
+    }
+
+    /// Parses a stored key, or `None` for anything this build does not know.
+    ///
+    /// `from_key` deliberately falls back to Google so a config written by a
+    /// newer build still boots; a settings write must not go through that
+    /// fallback, because a typo would be saved as a working-looking value the
+    /// user never chose.
+    pub fn from_key_checked(value: &str) -> Option<Self> {
+        match value {
+            SEARCH_ENGINE_DUCKDUCKGO => Some(SearchEngine::DuckDuckGo),
+            SEARCH_ENGINE_GOOGLE => Some(SearchEngine::Google),
+            SEARCH_ENGINE_BING => Some(SearchEngine::Bing),
+            _ => None,
+        }
+    }
+
+    pub fn from_key(value: &str) -> Self {
+        Self::from_key_checked(value).unwrap_or(SearchEngine::Google)
     }
 
     pub fn build_search_url(self, query: &str) -> String {
@@ -214,6 +338,18 @@ impl SqliteStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)?)
     }
 
+    /// The same IMMEDIATE transaction for the write paths that only hold a
+    /// shared borrow. `record_usage_event` and `record_url_hit` must not open
+    /// DEFERRED: the URL one reads the rows it is about to prune, and a stale
+    /// read snapshot cannot be upgraded - SQLite returns `SQLITE_BUSY_SNAPSHOT`
+    /// immediately instead of honouring `busy_timeout`.
+    fn write_tx_shared(&self) -> StorageResult<rusqlite::Transaction<'_>> {
+        Ok(rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            TransactionBehavior::Immediate,
+        )?)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> StorageResult<Self> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -221,14 +357,88 @@ impl SqliteStore {
         }
 
         let conn = Connection::open(path)?;
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            clipboard_text_cap: MAX_CLIPBOARD_ROWS,
+            clipboard_filter_secrets: true,
+            clipboard_retention_days: 0,
+        };
         store.migrate()?;
         Ok(store)
     }
 
+    /// Sets how many unpinned text clips are kept, clamped to a range that keeps
+    /// the prune query sane (`10..=MAX_CLIPBOARD_ROWS`).
+    ///
+    /// Prunes immediately and returns how many rows went away. A retention limit
+    /// that only takes effect on the next copy is not a retention limit: a user
+    /// who lowers it to 10 to shrink what is stored expects the old rows gone
+    /// now, not after their next Ctrl+C.
+    pub fn set_clipboard_text_cap(&mut self, limit: usize) -> StorageResult<usize> {
+        self.clipboard_text_cap = limit.clamp(MIN_CLIPBOARD_ROWS, MAX_CLIPBOARD_ROWS);
+        prune_clipboard(&self.conn, CLIPBOARD_KIND_TEXT, self.clipboard_text_cap)
+    }
+
+    /// Turns the credential filter on or off. On by default: a clipboard history
+    /// is a persistent, searchable copy of everything copied, and a leaked key
+    /// copy is the one entry nobody wants to find there later.
+    pub fn set_clipboard_filter_secrets(&mut self, enabled: bool) {
+        self.clipboard_filter_secrets = enabled;
+    }
+
+    /// Deletes unpinned text clips older than `days` days and returns how many
+    /// went away. `0` disables the age limit (the default) and deletes nothing.
+    ///
+    /// Applied immediately for the same reason as the size cap: a retention
+    /// limit that only takes effect on the next copy is not a retention limit.
+    /// Values above [`MAX_CLIPBOARD_RETENTION_DAYS`] are clamped, not obeyed as
+    /// written, so the cutoff stays inside the range the arithmetic can carry.
+    pub fn set_clipboard_retention_days(&mut self, days: u32) -> StorageResult<usize> {
+        self.clipboard_retention_days = days.min(MAX_CLIPBOARD_RETENTION_DAYS);
+        prune_clipboard_by_age(&self.conn, self.clipboard_retention_days, current_unix_s()?)
+    }
+
+    /// Opens the database, moving a corrupted file aside and starting fresh.
+    ///
+    /// A corrupt SQLite file used to abort startup: `open` fails, the Tauri
+    /// `setup` returns that error, and the window never appears. The unreadable
+    /// file is renamed rather than deleted, so anything still salvageable stays
+    /// on disk, and the app comes up with an empty history that rebuilds itself.
+    ///
+    /// Only corruption triggers the recovery. A locked or permission-denied file
+    /// is a different problem — renaming would hide it instead of reporting it.
+    pub fn open_or_recover(path: impl AsRef<Path>) -> StorageResult<Self> {
+        let path = path.as_ref();
+        match Self::open(path) {
+            Ok(store) => Ok(store),
+            Err(err) if err.is_corruption() => {
+                let stamp = current_unix_s()?;
+                // The write-ahead log and shared-memory file belong to the
+                // corrupt database. Leaving them behind would let SQLite
+                // replay those pages into the new file.
+                for suffix in ["", "-wal", "-shm"] {
+                    let from = sibling_with_suffix(path, suffix);
+                    if from.exists() {
+                        std::fs::rename(
+                            &from,
+                            sibling_with_suffix(path, &format!("{suffix}.corrupt-{stamp}")),
+                        )?;
+                    }
+                }
+                Self::open(path)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     pub fn open_in_memory() -> StorageResult<Self> {
         let conn = Connection::open_in_memory()?;
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            clipboard_text_cap: MAX_CLIPBOARD_ROWS,
+            clipboard_filter_secrets: true,
+            clipboard_retention_days: 0,
+        };
         store.migrate()?;
         Ok(store)
     }
@@ -446,7 +656,7 @@ impl SqliteStore {
             .map_err(|err| StorageError::Data(format!("system time error: {err}")))?
             .as_secs() as i64;
 
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = self.write_tx_shared()?;
         tx.execute(
             "INSERT INTO usage_events(candidate_id, action, used_at_unix_s) VALUES (?1, ?2, ?3)",
             params![candidate_id, action, now],
@@ -469,7 +679,7 @@ impl SqliteStore {
             return Ok(());
         }
         let now = current_unix_s()?;
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = self.write_tx_shared()?;
         tx.execute(
             "INSERT INTO url_history(url, hit_count, last_used_at_unix_s) VALUES (?1, 1, ?2)
              ON CONFLICT(url) DO UPDATE SET
@@ -526,17 +736,62 @@ impl SqliteStore {
         Ok(rows)
     }
 
+    /// Whether new clips are being recorded. Off by default.
+    ///
+    /// A stored setting rather than a process flag: pausing has to survive a
+    /// restart, or the next launch quietly starts recording again while the user
+    /// still believes it is off.
+    pub fn clipboard_paused(&self) -> StorageResult<bool> {
+        let value: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![SETTINGS_KEY_CLIPBOARD_PAUSED],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value.as_deref() == Some(SETTINGS_TRUE))
+    }
+
+    pub fn set_clipboard_paused(&self, paused: bool) -> StorageResult<()> {
+        self.conn.execute(
+            "INSERT INTO settings(key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![
+                SETTINGS_KEY_CLIPBOARD_PAUSED,
+                if paused {
+                    SETTINGS_TRUE
+                } else {
+                    SETTINGS_FALSE
+                }
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Remembers a clip and returns its row id (the handle a later delete
     /// needs). Re-copying moves the row to now instead of duplicating it;
     /// oldest-first pruning keeps the table bounded.
     ///
     /// The caller must never pass a concealed or transient clip: only the
-    /// shell can read the pasteboard markers that say so.
+    /// shell can read the pasteboard markers that say so. Clips larger than
+    /// [`MAX_CLIPBOARD_ENTRY_BYTES`] return `Ok(None)`; they are not truncated,
+    /// because a half-clip is worse than no clip.
     pub fn record_clipboard_entry(
         &self,
         content: &str,
         app_bundle_id: Option<&str>,
     ) -> StorageResult<Option<i64>> {
+        // Checked before hashing, not just in `insert_clip`: hashing walks every
+        // byte, and a 40 MB paste is exactly the payload the cap exists for.
+        if content.len() > MAX_CLIPBOARD_ENTRY_BYTES {
+            return Ok(None);
+        }
+        // A credential is not history. Checked here rather than at the capture
+        // site so the launcher's own "record this copy" path is covered too.
+        if self.clipboard_filter_secrets && secrets::looks_like_secret(content) {
+            return Ok(None);
+        }
         let hash = content_hash(content);
         self.insert_clip(content, &hash, CLIPBOARD_KIND_TEXT, app_bundle_id)
     }
@@ -544,6 +799,11 @@ impl SqliteStore {
     /// `label` is what the row is listed and searched by; `image_hash` is the
     /// identity, so the same picture under a new name still lifts one row. The
     /// bytes are the shell's to write, under that hash.
+    ///
+    /// The Tauri shell ships text-only history and never calls this: a copied
+    /// screenshot leaves no row and no file. The API stays because the contract
+    /// is what a shell that does store images must honour (hash identity, the
+    /// same de-duplication and retention), and it is tested here.
     pub fn record_clipboard_image(
         &self,
         label: &str,
@@ -564,11 +824,17 @@ impl SqliteStore {
         kind: &str,
         app_bundle_id: Option<&str>,
     ) -> StorageResult<Option<i64>> {
-        if content.trim().is_empty() {
+        if content.trim().is_empty() || content.len() > MAX_CLIPBOARD_ENTRY_BYTES {
             return Ok(None);
         }
         let now = current_unix_s()?;
-        let tx = self.conn.unchecked_transaction()?;
+        // IMMEDIATE, not the `unchecked_transaction` default (DEFERRED): this
+        // transaction reads the row it replaces before it writes it. In WAL a
+        // deferred transaction that read and then writes fails at once with
+        // SQLITE_BUSY_SNAPSHOT if another connection committed in between, and
+        // a bootstrap pass does open its own connection. Taking the write lock
+        // up front lets `busy_timeout` wait instead of dropping the clip.
+        let tx = rusqlite::Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
         // Replaced, not updated: an in-place update keeps the old id, and
         // within the same second the id breaks the recency tie - so a re-copy
         // would sort below something older.
@@ -611,22 +877,17 @@ impl SqliteStore {
         let cap = if kind == CLIPBOARD_KIND_IMAGE {
             MAX_CLIPBOARD_IMAGE_ROWS
         } else {
-            MAX_CLIPBOARD_ROWS
+            self.clipboard_text_cap
         };
         // Only the overflow: `WHERE id NOT IN (SELECT ... LIMIT cap)` would
         // scan the whole table on every copy, for nothing until the 5,001st.
         // Per kind, so the two histories cannot evict each other. Pinned
         // clips neither count toward the cap nor get pruned.
-        tx.execute(
-            "DELETE FROM clipboard_entries
-             WHERE kind = ?1 AND pinned = 0 AND (copied_at_unix_s, id) < (
-               SELECT copied_at_unix_s, id FROM clipboard_entries
-               WHERE kind = ?1 AND pinned = 0
-               ORDER BY copied_at_unix_s DESC, id DESC
-               LIMIT 1 OFFSET ?2
-             )",
-            params![kind, cap as i64 - 1],
-        )?;
+        prune_clipboard(&tx, kind, cap)?;
+        // The age limit is text-only and global to that history, so it runs on
+        // every insert rather than only on text copies: a copy is the moment
+        // the user is waiting anyway, and the statement is index-backed.
+        prune_clipboard_by_age(&tx, self.clipboard_retention_days, now)?;
         tx.commit()?;
         Ok(Some(row_id))
     }
@@ -1214,12 +1475,288 @@ mod tests {
     }
 
     #[test]
+    fn an_oversized_clip_is_not_stored() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        // One byte over the ceiling: nothing is written, and nothing is
+        // truncated into a half-clip.
+        let huge = "x".repeat(MAX_CLIPBOARD_ENTRY_BYTES + 1);
+        assert_eq!(store.record_clipboard_entry(&huge, None).unwrap(), None);
+        assert!(
+            store
+                .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 10)
+                .unwrap()
+                .is_empty()
+        );
+
+        // The ceiling itself is a normal clip.
+        let at_limit = "y".repeat(MAX_CLIPBOARD_ENTRY_BYTES);
+        assert!(
+            store
+                .record_clipboard_entry(&at_limit, None)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn the_configured_history_limit_caps_the_table() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.set_clipboard_text_cap(10).unwrap();
+        for i in 0..25 {
+            store
+                .record_clipboard_entry(&format!("clip {i:02}"), None)
+                .unwrap();
+        }
+
+        let all = store
+            .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 100)
+            .unwrap();
+        assert_eq!(all.len(), 10);
+        assert_eq!(all[0].content, "clip 24");
+        assert_eq!(all[9].content, "clip 15");
+
+        // A nonsensical value is clamped, never treated as "keep nothing".
+        store.set_clipboard_text_cap(0).unwrap();
+        for i in 0..12 {
+            store
+                .record_clipboard_entry(&format!("extra {i}"), None)
+                .unwrap();
+        }
+        assert_eq!(
+            store
+                .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 100)
+                .unwrap()
+                .len(),
+            MIN_CLIPBOARD_ROWS
+        );
+    }
+
+    /// A retention limit has to apply to what is already stored. Leaving 5,000
+    /// rows in place until the next copy is not a limit the user can rely on.
+    #[test]
+    fn lowering_the_history_limit_prunes_immediately() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        for i in 0..30 {
+            store
+                .record_clipboard_entry(&format!("clip {i:02}"), None)
+                .unwrap();
+        }
+        assert_eq!(
+            store
+                .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 100)
+                .unwrap()
+                .len(),
+            30
+        );
+
+        let removed = store.set_clipboard_text_cap(10).unwrap();
+        assert_eq!(removed, 20);
+        let kept = store
+            .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 100)
+            .unwrap();
+        assert_eq!(kept.len(), 10);
+        assert_eq!(kept[0].content, "clip 29");
+        assert_eq!(kept[9].content, "clip 20");
+
+        // Lowering again with nothing to prune is a no-op, not an error.
+        assert_eq!(store.set_clipboard_text_cap(10).unwrap(), 0);
+    }
+
+    /// The age limit is a privacy control, so the two things that must never
+    /// happen are: deleting a pinned clip, and deleting anything while the
+    /// feature is off (its default, and what every existing install has).
+    #[test]
+    fn clipboard_age_retention_deletes_only_old_unpinned_text() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.record_clipboard_entry("old clip", None).unwrap();
+        store.record_clipboard_entry("fresh clip", None).unwrap();
+        let pinned_id = store
+            .record_clipboard_entry("pinned old clip", None)
+            .unwrap()
+            .expect("clip id");
+        store
+            .record_clipboard_image("screenshot", "hash-old-image", None)
+            .unwrap();
+        assert!(store.set_clipboard_pinned(pinned_id, true).unwrap());
+
+        let now = current_unix_s().unwrap();
+        let old = now - 30 * 86_400;
+        store
+            .conn
+            .execute(
+                "UPDATE clipboard_entries SET copied_at_unix_s = ?1
+                 WHERE content IN ('old clip', 'pinned old clip', 'screenshot')",
+                params![old],
+            )
+            .unwrap();
+
+        // Off is the default: it must delete nothing even when old rows exist.
+        assert_eq!(store.set_clipboard_retention_days(0).unwrap(), 0);
+        assert_eq!(
+            store
+                .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 10)
+                .unwrap()
+                .len(),
+            3
+        );
+
+        assert_eq!(store.set_clipboard_retention_days(7).unwrap(), 1);
+        let texts: Vec<String> = store
+            .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 10)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.content)
+            .collect();
+        assert!(texts.iter().any(|text| text == "fresh clip"));
+        assert!(
+            texts.iter().any(|text| text == "pinned old clip"),
+            "a pinned clip is never deleted by age"
+        );
+        assert!(!texts.iter().any(|text| text == "old clip"));
+
+        // An image row owns a file this layer does not manage. Deleting the row
+        // would leave the bytes behind with nothing pointing at them.
+        assert_eq!(
+            store
+                .clipboard_entries(CLIPBOARD_KIND_IMAGE, "", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    /// "Older than N days" is measured from the last copy, so using a clip
+    /// again keeps it. Otherwise retention would delete the clips the user
+    /// reaches for most.
+    #[test]
+    fn recopying_a_clip_resets_its_age() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.record_clipboard_entry("reused", None).unwrap();
+        let old = current_unix_s().unwrap() - 30 * 86_400;
+        store
+            .conn
+            .execute(
+                "UPDATE clipboard_entries SET copied_at_unix_s = ?1",
+                params![old],
+            )
+            .unwrap();
+
+        store.record_clipboard_entry("reused", None).unwrap();
+        assert_eq!(store.set_clipboard_retention_days(7).unwrap(), 0);
+        assert_eq!(
+            store
+                .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    /// The setter is the last line of defence for the cutoff arithmetic: a
+    /// caller passing `u32::MAX` must not overflow it, and the documented
+    /// ceiling is what gets honoured.
+    #[test]
+    fn clipboard_retention_days_is_clamped_and_cannot_overflow() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.record_clipboard_entry("ancient", None).unwrap();
+        let now = current_unix_s().unwrap();
+        // A minute past the ceiling, not a second: the setter reads the clock
+        // again, and the assertion must not depend on both reads landing in the
+        // same second.
+        let beyond_ceiling = now - (i64::from(MAX_CLIPBOARD_RETENTION_DAYS) * 86_400) - 60;
+        store
+            .conn
+            .execute(
+                "UPDATE clipboard_entries SET copied_at_unix_s = ?1",
+                params![beyond_ceiling],
+            )
+            .unwrap();
+
+        assert_eq!(store.set_clipboard_retention_days(u32::MAX).unwrap(), 1);
+        assert_eq!(
+            store
+                .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 10)
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    /// Credentials must never become searchable history. Ordinary Arabic text
+    /// (including digits) must still be stored.
+    #[test]
+    fn credential_like_clips_are_refused_by_default() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        assert!(
+            store
+                .record_clipboard_entry(
+                    "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----",
+                    None
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .record_clipboard_entry("AKIAIOSFODNN7EXAMPLE", None)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(store.clear_clipboard_entries().unwrap(), 0);
+
+        assert!(
+            store
+                .record_clipboard_entry("فاتورة ٢٠٢٦ بمبلغ 1250 ريالاً", None)
+                .unwrap()
+                .is_some()
+        );
+
+        // The filter is a policy, not a hard rule: turning it off restores the
+        // previous behaviour for users who want the key in their history.
+        store.set_clipboard_filter_secrets(false);
+        assert!(
+            store
+                .record_clipboard_entry("AKIAIOSFODNN7EXAMPLE", None)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    /// The pause has to outlive the process: a restart must not silently resume
+    /// recording behind a user who believes it is off.
+    #[test]
+    fn clipboard_pause_survives_a_reopen() {
+        let dir = std::env::temp_dir().join(format!(
+            "zeidex-pause-{}-{}",
+            std::process::id(),
+            current_unix_s().expect("clock")
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("zeidex.db");
+
+        {
+            let store = SqliteStore::open(&path).expect("open store");
+            assert!(!store.clipboard_paused().expect("default"));
+            store.set_clipboard_paused(true).expect("pause");
+            assert!(store.clipboard_paused().expect("paused"));
+        }
+        {
+            let store = SqliteStore::open(&path).expect("reopen store");
+            assert!(store.clipboard_paused().expect("still paused"));
+            store.set_clipboard_paused(false).expect("resume");
+            assert!(!store.clipboard_paused().expect("resumed"));
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn pinned_clips_list_first_and_survive_pruning() {
         let store = SqliteStore::open_in_memory().unwrap();
         let pinned = store
             .record_clipboard_entry("keep me", None)
             .unwrap()
-            .unwrap();
+            .expect("row id");
         assert!(store.set_clipboard_pinned(pinned, true).unwrap());
         for i in 0..(MAX_CLIPBOARD_ROWS + 5) {
             store
@@ -1429,6 +1966,71 @@ mod tests {
             let mut rows = stmt.query([name]).expect("query table name");
             assert!(rows.next().expect("fetch table row").is_some());
         }
+    }
+
+    /// A file SQLite cannot read must not stop the app from starting. The
+    /// unreadable bytes are kept under a `.corrupt-*` name, never deleted.
+    #[test]
+    fn a_corrupt_database_is_kept_and_replaced() {
+        let dir = std::env::temp_dir().join(format!(
+            "zeidex-corrupt-{}-{}",
+            std::process::id(),
+            current_unix_s().expect("clock")
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("zeidex.db");
+        let garbage = b"not a sqlite database, just bytes".to_vec();
+        std::fs::write(&path, &garbage).expect("write garbage");
+
+        let store = SqliteStore::open_or_recover(&path).expect("recover from corruption");
+        // The recovered store is usable straight away.
+        store
+            .record_clipboard_entry("after recovery", None)
+            .expect("write to the recovered store")
+            .expect("a row id");
+        assert_eq!(
+            store
+                .clipboard_entries(CLIPBOARD_KIND_TEXT, "", 10)
+                .expect("read")
+                .len(),
+            1
+        );
+
+        let backups: Vec<_> = std::fs::read_dir(&dir)
+            .expect("list temp dir")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
+            .collect();
+        assert_eq!(
+            backups.len(),
+            1,
+            "the corrupt file must be kept, not deleted"
+        );
+        assert_eq!(
+            std::fs::read(backups[0].path()).expect("read backup"),
+            garbage,
+            "the backup must hold the original bytes untouched"
+        );
+
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Busy and permission failures are not corruption: renaming the file would
+    /// hide a problem the user can still fix.
+    #[test]
+    fn only_corruption_counts_as_recoverable() {
+        let locked = StorageError::Sql(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".to_string()),
+        ));
+        assert!(!locked.is_corruption());
+
+        let corrupt = StorageError::Sql(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_NOTADB),
+            Some("file is not a database".to_string()),
+        ));
+        assert!(corrupt.is_corruption());
     }
 
     #[test]
@@ -2051,5 +2653,40 @@ mod tests {
         // The oldest (site0) was evicted; the newest survives.
         assert!(store.recent_urls("site0.com", 5).expect("q").is_empty());
         assert_eq!(store.recent_urls("newest", 5).expect("q").len(), 1);
+    }
+
+    #[test]
+    fn search_engine_keys_round_trip_and_unknown_keys_are_reported() {
+        for engine in SearchEngine::all() {
+            assert_eq!(SearchEngine::from_key_checked(engine.key()), Some(engine));
+        }
+        // `from_key` is the tolerant read used at startup: an unknown stored
+        // value falls back instead of failing the whole settings load.
+        assert_eq!(SearchEngine::from_key("nope"), SearchEngine::Google);
+        // The settings write uses the strict read: a typo must be refused, not
+        // silently saved as Google.
+        assert_eq!(SearchEngine::from_key_checked("nope"), None);
+    }
+
+    #[test]
+    fn saving_search_settings_round_trips_every_engine() {
+        let mut store = SqliteStore::open_in_memory().expect("open");
+        assert!(
+            store
+                .load_search_settings()
+                .expect("load")
+                .web_search_enabled
+        );
+        for engine in SearchEngine::all() {
+            store
+                .save_search_settings(SearchSettings {
+                    web_search_enabled: false,
+                    web_search_engine: engine,
+                })
+                .expect("save");
+            let loaded = store.load_search_settings().expect("load");
+            assert!(!loaded.web_search_enabled);
+            assert_eq!(loaded.web_search_engine, engine);
+        }
     }
 }

@@ -80,10 +80,12 @@ export default function Launcher({
   rtl,
   onToggleRtl,
   onOpenOcr,
+  onOpenSettings,
 }: {
   rtl: boolean;
   onToggleRtl: () => void;
   onOpenOcr: () => void;
+  onOpenSettings: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("all");
@@ -92,18 +94,26 @@ export default function Launcher({
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<ClipEntry[]>([]);
+  const [clipboardPaused, setClipboardPaused] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [calc, setCalc] = useState<Calculation | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Ticket for clipboard list reads: a response that started before a delete, a
+  // pin, or a newer read must not overwrite the newer state.
+  const clipboardSeq = useRef(0);
 
   // `tr"` switches the panel from search to translation; the prefix is consumed
   // and the rest of the query is the text to translate.
   const translateText = query.startsWith('tr"') ? query.slice(3) : null;
 
+  // A tab change returns focus to the query box and re-arms the selection:
+  // clicking a filter moved focus to the button, and every shortcut in this
+  // panel is typed into the input.
   useEffect(() => {
     inputRef.current?.focus();
-  }, []);
+    setSelected(0);
+  }, [tab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,24 +165,30 @@ export default function Launcher({
   useEffect(() => {
     if (tab !== "clipboard") return;
     let stopped = false;
-    const load = async () => {
-      try {
-        const clips = await api.clipboardList("text", "", 100);
-        if (!stopped) setClipboard(clips);
-      } catch {
-        // Clipboard history is optional; a headless session has no pasteboard.
-      }
+    const refresh = async () => {
+      const ticket = ++clipboardSeq.current;
+      const clips = await api.clipboardList("text", "", 100);
+      if (!stopped && ticket === clipboardSeq.current) setClipboard(clips);
     };
-    load();
-    const interval = window.setInterval(async () => {
-      try {
-        await api.clipboardPoll();
-        const clips = await api.clipboardList("text", "", 100);
-        if (!stopped) setClipboard(clips);
-      } catch {
-        // Ignore pasteboard errors while polling.
-      }
-    }, 1000);
+    const safeRefresh = () => {
+      refresh().catch(() => {
+        // Clipboard history is optional; a headless session has no pasteboard.
+      });
+    };
+    // The backend monitor records clips; polling once before the first read is
+    // what makes a clip copied immediately before the tab opened show up now
+    // instead of on the next tick.
+    api
+      .clipboardPoll()
+      .catch(() => undefined)
+      .then(safeRefresh);
+    api
+      .clipboardPaused()
+      .then((value) => {
+        if (!stopped) setClipboardPaused(value);
+      })
+      .catch(() => undefined);
+    const interval = window.setInterval(safeRefresh, 1000);
     return () => {
       stopped = true;
       window.clearInterval(interval);
@@ -196,7 +212,12 @@ export default function Launcher({
     const result = visible[selected];
     if (!result) return;
     try {
-      await api.recordUsage(result.id, usageAction(result));
+      // A web row is composed by the shell and has no candidate row, so there
+      // is nothing for `usage_events` to point at (the foreign key would fail
+      // and abort the open).
+      if (result.action.type !== "web_search") {
+        await api.recordUsage(result.id, usageAction(result));
+      }
       switch (result.action.type) {
         case "open":
         case "open_folder":
@@ -218,6 +239,34 @@ export default function Launcher({
       await getCurrentWindow().hide();
     } catch (err) {
       setNotice(String(err));
+    }
+  };
+
+  const toggleClipboardPause = async () => {
+    try {
+      // The backend is the source of truth: the switch shows what it stored,
+      // not what the click hoped for.
+      setClipboardPaused(await api.clipboardSetPaused(!clipboardPaused));
+    } catch {
+      setNotice(rtl ? "تعذّر تغيير حالة التسجيل" : "Could not change recording");
+    }
+  };
+
+  const clearClipboard = async () => {
+    try {
+      await api.clipboardClear();
+    } catch {
+      // Fall through to the re-read: if the wipe failed the rows come back and
+      // the user can see it did not happen.
+    }
+    try {
+      // A list read that started before the wipe must not land after it and
+      // put the rows back; this ticket is newer than any of those.
+      const ticket = ++clipboardSeq.current;
+      const clips = await api.clipboardList("text", "", 100);
+      if (ticket === clipboardSeq.current) setClipboard(clips);
+    } catch {
+      // Leave the list as it is; the next poll refreshes it.
     }
   };
 
@@ -308,6 +357,15 @@ export default function Launcher({
             </button>
             <button
               type="button"
+              onClick={onOpenSettings}
+              aria-label={rtl ? "الإعدادات" : "Settings"}
+              title={rtl ? "الإعدادات" : "Settings"}
+              className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+            >
+              <Icon name="tune" size={14} />
+            </button>
+            <button
+              type="button"
               onClick={onToggleRtl}
               aria-label={rtl ? "Switch to English" : "التبديل إلى العربية"}
               className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-xs font-semibold text-zinc-400 transition hover:bg-white/10 hover:text-white"
@@ -363,7 +421,7 @@ export default function Launcher({
               onClick={() => void copyCalc(calc)}
               className="flex w-full items-center gap-3 rounded-xl border border-accent-400/20 bg-accent-400/[0.06] px-3.5 py-2 text-start transition hover:bg-accent-400/10"
             >
-              <span className="text-[0.6rem] font-semibold uppercase tracking-[0.16em] text-accent-400/80">
+              <span className="text-[0.6rem] font-semibold micro-label tracking-[0.16em] text-accent-400/80">
                 {rtl ? "حاسبة" : "Calculator"}
               </span>
               <span
@@ -384,12 +442,22 @@ export default function Launcher({
             <ClipboardPanel
               entries={clipboard}
               rtl={rtl}
-              onDeleted={(id) => setClipboard((items) => items.filter((item) => item.id !== id))}
-              onToggled={(entry) =>
+              paused={clipboardPaused}
+              onTogglePause={() => void toggleClipboardPause()}
+              onClear={() => void clearClipboard()}
+              onError={(message) => setNotice(message)}
+              onDeleted={(id) => {
+                // Invalidate any list read that is already in flight, or it can
+                // land after this update and put the row back.
+                clipboardSeq.current += 1;
+                setClipboard((items) => items.filter((item) => item.id !== id));
+              }}
+              onToggled={(entry) => {
+                clipboardSeq.current += 1;
                 setClipboard((items) =>
                   items.map((item) => (item.id === entry.id ? entry : item)),
-                )
-              }
+                );
+              }}
             />
           ) : idle ? (
             <div className="animate-rise grid grid-cols-1 gap-2 px-5 pb-4 sm:grid-cols-3">
@@ -398,7 +466,7 @@ export default function Launcher({
                   key={hint.title}
                   className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"
                 >
-                  <span className="flex items-center gap-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                  <span className="flex items-center gap-1.5 text-[0.62rem] font-semibold micro-label tracking-[0.14em] text-zinc-500">
                     <Icon name={hint.icon} size={12} />
                     {rtl ? hint.titleAr : hint.title}
                   </span>

@@ -94,6 +94,19 @@ body {
   font-family: var(--font-arabic);
 }
 
+/* Micro-labels: uppercase and wide tracking are Latin typographic devices.
+   Arabic is a joined script with no capitals, so the tracking opens the joins
+   and `text-transform` does nothing. One class keeps the two rules together;
+   unlayered, so the RTL reset wins over the per-site `tracking-*` utility. */
+.micro-label {
+  text-transform: uppercase;
+}
+
+[dir="rtl"] .micro-label {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 ::selection {
   background: color-mix(in srgb, var(--color-accent-500) 35%, transparent);
   color: #fff;

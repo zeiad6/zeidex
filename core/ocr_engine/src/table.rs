@@ -209,20 +209,34 @@ fn edge_index(edges: &[f32], value: f32) -> Option<usize> {
     edges.iter().position(|edge| (edge - value).abs() <= 8.0)
 }
 
-/// Places recognized words into the cell that contains their center. Words that
-/// fall outside every cell are dropped rather than mis-assigned.
+/// Assigns each recognized line to the cell it overlaps most.
+///
+/// The structure model emits text-sized boxes that can sit a few pixels off the
+/// glyphs, most visibly for a single digit in a wide column. Requiring the
+/// line's centre to fall inside a cell silently dropped those words; choosing
+/// the largest overlap forgives the offset without inventing matches for lines
+/// that lie outside the grid.
 pub fn assign_texts(table: &mut TableStructure, words: &[(BBox, String)]) {
     for (bbox, text) in words {
-        let center = bbox.center();
-        let mut best: Option<&mut TableCell> = None;
-        let mut best_area = f32::MAX;
-        for cell in table.cells.iter_mut() {
-            if cell.bbox.contains(center) && cell.bbox.area() < best_area {
-                best_area = cell.bbox.area();
-                best = Some(cell);
+        let mut best: Option<(usize, f32, f32)> = None;
+        for (index, cell) in table.cells.iter().enumerate() {
+            let overlap = bbox.intersection_area(&cell.bbox);
+            if overlap <= 0.0 {
+                continue;
+            }
+            let area = cell.bbox.area();
+            let better = match best {
+                None => true,
+                Some((_, best_overlap, best_area)) => {
+                    overlap > best_overlap || (overlap == best_overlap && area < best_area)
+                }
+            };
+            if better {
+                best = Some((index, overlap, area));
             }
         }
-        if let Some(cell) = best {
+        if let Some((index, _, _)) = best {
+            let cell = &mut table.cells[index];
             if !cell.text.is_empty() {
                 cell.text.push(' ');
             }
@@ -333,14 +347,17 @@ const RULING_DARK: u8 = 160;
 const RULING_MIN_SIDE: u32 = 24;
 
 /// The structure-token class list a SLANet export was trained with
-/// (PP-StructureV2's `table_structure_dict.txt`: 28 HTML fragments).
+/// (PP-StructureV2's `table_structure_dict.txt`: 28 HTML fragments plus the two
+/// attention tokens described below).
 ///
-/// The shipped `en_ppstructure_mobile_v2.0_SLANet` export is trained with
-/// `merge_no_span_structure`: `<td>` is dropped from the class list, a merged
-/// `<td></td>` class is appended, and a CTC-style `<blank>` occupies index 0.
-/// Reproducing that layout keeps class indices aligned with the model. Tokens
-/// are matched by *text*, never by a hardcoded index, so a different export
-/// cannot silently shift a semantic token into the wrong role.
+/// The shipped `en_ppstructure_mobile_v2.0_SLANet` export is built with
+/// PaddleOCR's `TableLabelDecode`, which applies `merge_no_span_structure` to the
+/// file (`<td>` dropped, `<td></td>` appended) and then adds the attention `sos`
+/// and `eos` tokens, so the model's 30 classes are `sos`, 28 structure tokens,
+/// and `eos` — in that order. The order is reproduced explicitly because an
+/// off-by-one here turns `</tr>` into a cell token. Tokens are matched by
+/// *text*, never by a hardcoded index, so a different export cannot silently
+/// shift a semantic token into the wrong role.
 #[derive(Clone, Debug)]
 pub struct StructureDict {
     tokens: Vec<String>,
@@ -348,17 +365,23 @@ pub struct StructureDict {
 
 impl StructureDict {
     pub fn from_entries(entries: impl IntoIterator<Item = String>) -> Self {
-        let mut merged: Vec<String> = entries
+        let mut tokens: Vec<String> = entries
             .into_iter()
             .map(|entry| entry.trim().to_string())
             .filter(|entry| !entry.is_empty() && entry != "<td>")
             .collect();
-        if !merged.iter().any(|entry| entry == "<td></td>") {
-            merged.push("<td></td>".to_string());
+        if !tokens.iter().any(|entry| entry == "<td></td>") {
+            tokens.push("<td></td>".to_string());
         }
-        let mut tokens = Vec::with_capacity(merged.len() + 1);
-        tokens.push(String::from("<blank>"));
-        tokens.extend(merged);
+        // `sos`/`eos` are the attention start/end classes the model was trained
+        // with (`AttnLabelDecode`). Keep an already-labelled dictionary as-is so
+        // a re-export cannot end up with duplicates.
+        if tokens.first().map(String::as_str) != Some("sos") {
+            tokens.insert(0, String::from("sos"));
+        }
+        if tokens.last().map(String::as_str) != Some("eos") {
+            tokens.push(String::from("eos"));
+        }
         Self { tokens }
     }
 
@@ -463,6 +486,11 @@ pub fn decode_structure(
             continue;
         };
         let token = token.trim();
+        // `eos` ends the sequence; positions after it are decoder padding and
+        // must not be read as structure or cells.
+        if token == "eos" {
+            break;
+        }
         let bbox = boxes.get(position).copied().unwrap_or_default();
 
         if token == "<tr>" {
@@ -713,11 +741,11 @@ mod tests {
     }
 
     #[test]
-    fn assign_texts_places_words_by_center() {
+    fn assign_texts_uses_overlap_not_just_the_center() {
         let mut table = reconstruct(
             BBox::new(0.0, 0.0, 100.0, 100.0),
             &[row(0.0, 100.0)],
-            &[col(0.0, 50.0), col(50.0, 100.0)],
+            &[col(0.0, 50.0), col(80.0, 100.0)],
             &[],
         );
         assign_texts(
@@ -725,6 +753,9 @@ mod tests {
             &[
                 (BBox::new(10.0, 10.0, 30.0, 30.0), "left".to_string()),
                 (BBox::new(60.0, 10.0, 90.0, 30.0), "right".to_string()),
+                // Centre at x=76, outside both cells, but it overlaps the right
+                // cell: the model's cell boxes can sit a few pixels off a glyph.
+                (BBox::new(70.0, 40.0, 82.0, 60.0), "7".to_string()),
             ],
         );
         assert_eq!(
@@ -733,7 +764,7 @@ mod tests {
         );
         assert_eq!(
             table.cell_at(0, 1).map(|cell| cell.text.as_str()),
-            Some("right")
+            Some("right 7")
         );
     }
 
@@ -749,13 +780,29 @@ mod tests {
 
     #[test]
     fn structure_dict_merges_the_nos_span_class_list() {
-        // 28 base entries, `<td>` dropped, `<td></td>` appended, `<blank>` at 0.
+        // 28 base entries, `<td>` dropped, `<td></td>` appended, then the
+        // attention `sos`/`eos` classes: exactly the model's 30 outputs.
         let dict = StructureDict::builtin();
-        assert_eq!(dict.len(), 29);
-        assert_eq!(dict.get(0), Some("<blank>"));
+        assert_eq!(dict.len(), 30);
+        assert_eq!(dict.get(0), Some("sos"));
         assert_eq!(dict.get(1), Some("<thead>"));
         assert_eq!(dict.get(2), Some("<tr>"));
         assert_eq!(dict.get(28), Some("<td></td>"));
+        assert_eq!(dict.get(29), Some("eos"));
+    }
+
+    #[test]
+    fn decode_structure_stops_at_eos() {
+        let dict = StructureDict::builtin();
+        // One complete row, end token, then a cell token that must be ignored:
+        // the model pads after `eos` with `sos`, but a corrupt sequence can put
+        // anything there.
+        let tokens = [1, 2, 28, 28, 4, 5, 29, 28, 28];
+        let boxes = vec![BBox::new(0.0, 0.0, 0.1, 0.1); tokens.len()];
+        let table = decode_structure(&dict, &tokens, &boxes, BBox::new(0.0, 0.0, 100.0, 100.0));
+        assert_eq!(table.rows, 1);
+        assert_eq!(table.cols, 2);
+        assert_eq!(table.cells.len(), 2, "tokens after eos became cells");
     }
 
     /// The exact argmax sequence the shipped `slanet_table.onnx` emits for a

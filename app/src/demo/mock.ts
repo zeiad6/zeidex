@@ -20,6 +20,8 @@ const DEMO_PDF = "/home/you/Documents/Invoices/invoice-2026-014.pdf";
 export function installMock() {
   const callbacks = new Map<number, (payload: unknown) => void>();
   let nextCallback = 1;
+  let clipboardPaused = false;
+  let clips = CLIPS.slice();
 
   const search = (query: string): typeof RESULTS => {
     const needle = query.trim().toLowerCase();
@@ -44,13 +46,19 @@ export function installMock() {
       case "bootstrap_index":
         return 12_804;
       case "clipboard_list":
-        return CLIPS;
+        return clips;
       case "clipboard_poll":
         return null;
+      case "clipboard_paused":
+        return clipboardPaused;
+      case "clipboard_set_paused":
+        clipboardPaused = Boolean(args.paused);
+        return clipboardPaused;
       case "clipboard_set_pinned":
       case "clipboard_delete":
         return true;
       case "clipboard_clear":
+        clips = [];
         return CLIPS.length;
       case "ocr_models_status":
         return MODELS;

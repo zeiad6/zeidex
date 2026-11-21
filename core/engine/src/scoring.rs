@@ -166,7 +166,10 @@ pub(crate) fn path_depth_penalty(candidate: &Candidate) -> i64 {
         CandidateKind::File | CandidateKind::Folder => {
             let depth = candidate
                 .path
-                .split('/')
+                // Both separators: on Windows the path is all `\`, so splitting
+                // on `/` alone reported every path as depth 1 and erased the
+                // "shallower is better" signal.
+                .split(['/', '\\'])
                 .filter(|part| !part.is_empty())
                 .count() as i64;
             -(depth / 2)
