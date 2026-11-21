@@ -204,7 +204,7 @@ Requirements: Rust (pinned by `rust-toolchain.toml`), Node 20+, and the usual
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
-git clone https://github.com/cavaldos/zeidex.git
+git clone https://github.com/zeiad6/zeidex.git
 cd zeidex
 
 # 1. OCR models, once (≈ 35 MB, checksum-verified)
@@ -376,7 +376,7 @@ make core-test && make core-fmt && make core-clippy && make frontend-build
   </tr>
 </table>
 
-Support and suggestions: open an [issue](https://github.com/cavaldos/zeidex/issues) or reach the developer via the [developer card](https://zeidexlink.zeidexsoft.com/zeidex).
+Support and suggestions: open an [issue](https://github.com/zeiad6/zeidex/issues) or reach the developer via the [developer card](https://zeidexlink.zeidexsoft.com/zeidex).
 
 ## Licence and attribution
 
@@ -393,8 +393,8 @@ This project is a derivative of [`kunkka19xx/look`](https://github.com/kunkka19x
 library attributions are listed in [NOTICE](NOTICE).
 
 <p align="center">
-  <a href="https://star-history.com/#cavaldos/zeidex&Date">
-    <img src="https://api.star-history.com/svg?repos=cavaldos/zeidex&type=Date" alt="Star history" width="640" />
+  <a href="https://star-history.com/#zeiad6/zeidex&Date">
+    <img src="https://api.star-history.com/svg?repos=zeiad6/zeidex&type=Date" alt="Star history" width="640" />
   </a>
 </p>
 

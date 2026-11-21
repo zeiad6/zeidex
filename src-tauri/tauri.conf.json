@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Zeidex Studio",
   "version": "0.1.0",
-  "identifier": "com.cavaldos.zeidex",
+  "identifier": "com.zeidexsoft.zeidex",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",

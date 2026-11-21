@@ -2,7 +2,7 @@
 name = "zeidex-perf-tools"
 edition = "2024"
 license = "GPL-3.0-or-later"
-authors = ["cavaldos"]
+authors = ["Zeidexsoft"]
 version = "0.1.0"
 publish = false
 description = "Perf and stress benches for zeidex's index refresh / watcher path. Not shipped in any app bundle."

@@ -406,7 +406,7 @@ export const CLIPS: ClipEntry[] = [
   },
   {
     id: 4,
-    content: "https://github.com/cavaldos/zeidex",
+    content: "https://github.com/zeiad6/zeidex",
     kind: "text",
     copied_at_unix_s: NOW - 7200,
     copy_count: 7,
