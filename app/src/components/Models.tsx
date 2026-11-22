@@ -11,6 +11,7 @@ import { formatBytes } from "../model-format";
 import AdvisorCard from "./AdvisorCard";
 import { BrandMark } from "./Brand";
 import { Icon } from "./Icons";
+import WindowControls from "./WindowControls";
 import ModelCard from "./ModelCard";
 
 /** How the download area reports a finished job, so the message is not lost
@@ -343,6 +344,7 @@ export default function Models({ rtl, onBack }: ModelsProps) {
               <Icon name="refresh" size={13} />
               {t("Refresh", "تحديث")}
             </button>
+          <WindowControls rtl={rtl} />
           </div>
         </header>
 

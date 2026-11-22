@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type AppSettings, type DocumentIndexStatus, type ModelsStatus } from "../api";
+import {
+  api,
+  type AppSettings,
+  type AutostartStatus,
+  type DocumentIndexStatus,
+  type HotkeyStatus,
+  type ModelsStatus,
+} from "../api";
 import type { IndexStatus } from "../index-status";
 import {
   diff,
@@ -11,17 +18,19 @@ import {
 import { BrandMark } from "./Brand";
 import type { ThemeChoice } from "../theme";
 import { Icon, type IconName } from "./Icons";
+import WindowControls from "./WindowControls";
 
 interface Notice {
   kind: "done" | "warning" | "error";
   message: string;
 }
 
-type Section = "search" | "indexing" | "clipboard" | "appearance" | "about";
+type Section = "search" | "indexing" | "startup" | "clipboard" | "appearance" | "about";
 
 const SECTIONS: { id: Section; label: string; labelAr: string; icon: IconName }[] = [
   { id: "search", label: "Search", labelAr: "البحث", icon: "search" },
   { id: "indexing", label: "Indexing", labelAr: "الفهرسة", icon: "folder" },
+  { id: "startup", label: "Startup", labelAr: "بدء التشغيل", icon: "power" },
   { id: "clipboard", label: "Clipboard", labelAr: "الحافظة", icon: "clipboard" },
   { id: "appearance", label: "Appearance", labelAr: "المظهر", icon: "eye" },
   { id: "about", label: "About & Diagnostics", labelAr: "حول والتشخيص", icon: "info" },
@@ -187,6 +196,16 @@ export default function Settings({
   const [notice, setNotice] = useState<Notice | null>(null);
   const [models, setModels] = useState<ModelsStatus | null>(null);
   const [docIndex, setDocIndex] = useState<DocumentIndexStatus | null>(null);
+  // The launcher shortcut is the app's only way in when it starts hidden, so
+  // its registration result is shown here rather than logged and forgotten.
+  const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null);
+  const [hotkeyDraft, setHotkeyDraft] = useState("");
+  const [hotkeyBusy, setHotkeyBusy] = useState(false);
+  const [hotkeyNotice, setHotkeyNotice] = useState<string | null>(null);
+  // Launch-at-login is an OS fact, not a value in the config file: the toggle
+  // reads the registry/autostart entry back after every write.
+  const [autostart, setAutostart] = useState<AutostartStatus | null>(null);
+  const [autostartBusy, setAutostartBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -194,6 +213,24 @@ export default function Settings({
       .settingsSnapshot()
       .then((snapshot) => {
         if (!active) return;
+        void api
+          .hotkeyStatus()
+          .then((status) => {
+            if (!active) return;
+            setHotkey(status);
+            setHotkeyDraft(status.accelerator);
+          })
+          .catch(() => {
+            // The browser demo has no shell to answer.
+          });
+        void api
+          .autostartStatus()
+          .then((status) => {
+            if (active) setAutostart(status);
+          })
+          .catch(() => {
+            // Older shells have no such command; the card says "unavailable".
+          });
         const latest = latestIndex.current;
         setSettings(latest ? { ...snapshot, candidateCount: latest.count } : snapshot);
         setDraft(toDraft(snapshot));
@@ -497,6 +534,65 @@ export default function Settings({
     }
   };
 
+  const saveHotkey = async (accelerator: string | null) => {
+    setHotkeyBusy(true);
+    setHotkeyNotice(null);
+    try {
+      const status = await api.hotkeySet(accelerator);
+      setHotkey(status);
+      setHotkeyDraft(status.accelerator);
+      setHotkeyNotice(status.error);
+    } catch (err) {
+      setHotkeyNotice(String(err));
+    } finally {
+      setHotkeyBusy(false);
+    }
+  };
+
+  const toggleAutostart = async (next: boolean) => {
+    setAutostartBusy(true);
+    setNotice(null);
+    try {
+      const status = await api.autostartSet(next);
+      setAutostart(status);
+      if (status.enabled === next) {
+        setNotice({
+          kind: "done",
+          message: next
+            ? t(
+                "Zeidex will start with the system and stay in the tray.",
+                "سيبدأ Zeidex مع النظام ويبقى في شريط النظام.",
+              )
+            : t(
+                "Zeidex will no longer start with the system.",
+                "لن يبدأ Zeidex مع النظام بعد الآن.",
+              ),
+        });
+      } else {
+        setNotice({
+          kind: "warning",
+          message:
+            status.error ??
+            t(
+              "The system did not keep the change.",
+              "لم يحتفظ النظام بالتغيير.",
+            ),
+        });
+      }
+    } catch (err) {
+      setNotice({ kind: "error", message: String(err) });
+      // A failed write can still have changed the entry (for example, the
+      // delete succeeded and the follow-up read failed). Show what is there.
+      try {
+        setAutostart(await api.autostartStatus());
+      } catch {
+        // Leave the last known value; the error notice already explains it.
+      }
+    } finally {
+      setAutostartBusy(false);
+    }
+  };
+
   const renderSection = () => {
     if (!settings || !draft) return null;
     const limits = settings.limits;
@@ -506,8 +602,79 @@ export default function Settings({
         return (
           <div className="animate-rise">
             <SectionHeading
-              icon="globe"
-              title={t("Web search", "البحث على الويب")}
+              icon="sparkle"
+              title={t("Global shortcut", "الاختصار العام")}
+              description={t(
+                "Opens Zeidex from any application and puts the cursor in the search box. If another program already owns the combination, Zeidex falls back to the default and says so here.",
+                "يفتح Zeidex من أي تطبيق ويضع المؤشر في مربع البحث. إذا كان الاختصار محجوزاً لبرنامج آخر، يعود Zeidex إلى الافتراضي ويوضح ذلك هنا.",
+              )}
+            />
+            <Card>
+              <div className="flex flex-wrap items-end gap-3">
+                <label htmlFor="hotkey-accelerator" className="min-w-[13rem] flex-1">
+                  <span className="block text-[0.82rem] font-medium text-zinc-100">
+                    {t("Combination", "التركيبة")}
+                  </span>
+                  <span className="mt-0.5 block text-[0.72rem] leading-relaxed text-zinc-500">
+                    {t(
+                      "Modifiers plus a key, for example Alt+Space or Ctrl+Shift+Z.",
+                      "معدِّلات مع مفتاح، مثل Alt+Space أو Ctrl+Shift+Z.",
+                    )}
+                  </span>
+                </label>
+                <input
+                  id="hotkey-accelerator"
+                  value={hotkeyDraft}
+                  onChange={(event) => setHotkeyDraft(event.target.value)}
+                  spellCheck={false}
+                  dir="ltr"
+                  placeholder={hotkey?.default ?? "Alt+Space"}
+                  aria-describedby="hotkey-status"
+                  className="w-48 rounded-lg border border-white/10 bg-ink-900/70 px-3 py-1.5 font-mono text-sm text-zinc-100 transition focus:border-accent-400/40 focus:bg-ink-900"
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveHotkey(hotkeyDraft)}
+                  disabled={hotkeyBusy || hotkeyDraft.trim().length === 0}
+                  className="rounded-lg border border-accent-400/30 bg-accent-400/10 px-3 py-1.5 text-xs font-medium text-accent-200 transition hover:bg-accent-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {hotkeyBusy ? t("Saving…", "جارٍ الحفظ…") : t("Save", "حفظ")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveHotkey(null)}
+                  disabled={hotkeyBusy}
+                  className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {t("Reset to default", "استعادة الافتراضي")}
+                </button>
+              </div>
+              <p
+                id="hotkey-status"
+                role="status"
+                aria-live="polite"
+                className={`text-[0.72rem] leading-relaxed ${
+                  hotkey && !hotkey.registered ? "text-red-300" : "text-zinc-500"
+                }`}
+              >
+                {hotkeyNotice ??
+                  (hotkey
+                    ? hotkey.registered
+                      ? t(
+                          `Registered: ${hotkey.accelerator}. Closing the window keeps Zeidex in the tray.`,
+                          `مسجَّل: ${hotkey.accelerator}. إغلاق النافذة يبقي Zeidex في شريط النظام.`,
+                        )
+                      : t(
+                          `Not registered: ${hotkey.error ?? "the system refused the combination"}.`,
+                          `غير مسجَّل: ${hotkey.error ?? "رفض النظام التركيبة"}.`,
+                        )
+                    : t("Reading the current shortcut…", "جارٍ قراءة الاختصار الحالي…"))}
+              </p>
+            </Card>
+            <div className="mt-6">
+              <SectionHeading
+                icon="globe"
+                title={t("Web search", "البحث على الويب")}
               description={t(
                 "When web search is on, every query ends with a row that opens it in your browser. It is always last, so it can never outrank a local match.",
                 "عند تشغيل البحث على الويب، ينتهي كل استعلام بصف يفتحه في المتصفح. يبقى دائماً في الأسفل، فلا يتقدّم على نتيجة محلية.",
@@ -554,6 +721,7 @@ export default function Settings({
                 </select>
               </div>
             </Card>
+            </div>
           </div>
         );
 
@@ -740,6 +908,119 @@ export default function Settings({
                 />
               </Card>
             )}
+          </div>
+        );
+
+      case "startup":
+        return (
+          <div className="animate-rise space-y-4">
+            <SectionHeading
+              icon="power"
+              title={t("Startup", "بدء التشغيل")}
+              description={t(
+                "Launch Zeidex when you sign in to the system. It starts hidden in the tray, so the launcher is one shortcut away without a window in the way.",
+                "شغّل Zeidex عند تسجيل الدخول إلى النظام. يبدأ مخفياً في شريط النظام، فيكون المشغّل على بُعد اختصار واحد دون نافذة تعترض طريقك.",
+              )}
+            />
+            <Card>
+              {autostart === null ? (
+                <p className="text-[0.74rem] text-zinc-500">
+                  {t("Reading the startup entry…", "جارٍ قراءة إعداد بدء التشغيل…")}
+                </p>
+              ) : !autostart.supported ? (
+                <div
+                  role="status"
+                  className="flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.07] px-3.5 py-3 text-[0.74rem] leading-relaxed text-amber-200"
+                >
+                  <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
+                  <span>
+                    {autostart.error ??
+                      t(
+                        "Launch at login is not supported on this platform.",
+                        "بدء التشغيل مع النظام غير مدعوم على هذه المنصة.",
+                      )}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <Toggle
+                    checked={autostart.enabled}
+                    onChange={(next) => void toggleAutostart(next)}
+                    disabled={autostartBusy}
+                    title={t("Start Zeidex when you sign in", "تشغيل Zeidex عند تسجيل الدخول")}
+                    hint={t(
+                      "Adds one entry to the system's own startup list. Nothing else is installed and no service runs in the background.",
+                      "يضيف مدخلاً واحداً إلى قائمة بدء التشغيل الخاصة بالنظام. لا يُثبَّت شيء آخر ولا تعمل خدمة في الخلفية.",
+                    )}
+                  />
+                  <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3.5 py-3">
+                    <div className="flex flex-wrap items-center gap-2 text-[0.74rem]">
+                      <span className="font-medium text-zinc-200">{autostart.mechanism}</span>
+                      <span className="text-zinc-600">·</span>
+                      <span
+                        className={
+                          autostart.enabled ? "text-emerald-300" : "text-zinc-500"
+                        }
+                      >
+                        {autostart.enabled
+                          ? t("Active", "مفعّل")
+                          : t("Inactive", "غير مفعّل")}
+                      </span>
+                      {autostartBusy && (
+                        <span className="text-zinc-500">{t("Saving…", "يحفظ…")}</span>
+                      )}
+                    </div>
+                    {autostart.location && (
+                      <p
+                        className="mt-1.5 break-all font-mono text-[0.62rem] text-zinc-500"
+                        dir="ltr"
+                      >
+                        {autostart.location}
+                      </p>
+                    )}
+                    {autostart.command && (
+                      <p
+                        className="mt-1 break-all font-mono text-[0.62rem] text-zinc-600"
+                        dir="ltr"
+                      >
+                        {autostart.command}
+                      </p>
+                    )}
+                  </div>
+                  {autostart.development && (
+                    <div
+                      role="status"
+                      className="flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.07] px-3.5 py-2.5 text-[0.72rem] leading-relaxed text-amber-200"
+                    >
+                      <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
+                      <span>
+                        {t(
+                          "Development build: the entry points at the debug executable. Enable this only for an installed copy.",
+                          "نسخة تطوير: يشير المدخل إلى الملف التنفيذي للتطوير. فعّل هذا فقط لنسخة مثبّتة.",
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {autostart.error && (
+                    <p
+                      role="status"
+                      className="text-[0.72rem] leading-relaxed text-amber-200"
+                    >
+                      {autostart.error}
+                    </p>
+                  )}
+                  <div className="flex items-start gap-2 border-t border-white/[0.06] pt-4 text-[0.72rem] leading-relaxed text-zinc-500">
+                    <Icon name="info" size={13} className="mt-0.5 shrink-0 text-zinc-600" />
+                    <span>
+                      {t(
+                        "Closing the window keeps Zeidex running in the tray. Quit from the tray menu stops the process completely.",
+                        "إغلاق النافذة يبقي Zeidex يعمل في شريط النظام. أما «إنهاء» من قائمة الشريط فيوقف العملية تماماً.",
+                      )}
+                    </span>
+                  </div>
+                </>
+              )}
+            </Card>
           </div>
         );
 
@@ -1014,11 +1295,12 @@ export default function Settings({
               {t("Settings", "الإعدادات")}
             </span>
             <span className="mt-1 text-[0.5rem] font-medium micro-label tracking-[0.3em] text-zinc-500">
-              Zeidex
+              Zeidex Search
             </span>
           </div>
           <span className="ms-auto rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono text-[0.66rem] text-zinc-400" dir="ltr">
             v{settings?.version ?? "—"}
+          <WindowControls rtl={rtl} />
           </span>
         </header>
 

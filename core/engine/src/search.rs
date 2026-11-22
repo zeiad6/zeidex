@@ -9,7 +9,8 @@ use std::collections::BinaryHeap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zeidex_indexing::{Candidate, CandidateKind};
 use zeidex_matching::{
-    fuzzy_quality_bonus_prepared, fuzzy_score_prepared, normalize_for_search, prepare_query,
+    ApproximateMatcher, fuzzy_quality_bonus_prepared, fuzzy_score_prepared, normalize_for_search,
+    prepare_query,
 };
 use zeidex_ranking::rank_score;
 
@@ -230,6 +231,10 @@ impl QueryEngine {
         let settings_query = looks_like_settings_query(normalized_query);
         let pool_limit = (limit.saturating_mul(RERANK_POOL_MULTIPLIER)).max(RERANK_TOP_N);
         let alias_terms = self.alias_terms_for_query(normalized_query, kind_filter);
+        // Built once per pass and only consulted for candidates nothing else
+        // matched; `None` means this query is too short (or too long) to be
+        // matched approximately at all.
+        let mut approximate = ApproximateMatcher::new(normalized_query);
 
         for (idx, candidate) in self.candidates.iter().enumerate() {
             if !Self::kind_matches(candidate, kind_filter) {
@@ -284,8 +289,19 @@ impl QueryEngine {
             .flatten()
             .max();
 
-            let Some(base) = base else {
-                continue;
+            // Nothing typed is literally in the title. Before dropping the row,
+            // give the typo-tolerant matcher a chance: `invoise` should still
+            // find `invoice-2026-014.pdf`, and `2026-014` should find it by the
+            // end of the name (the suffix tier already scored that case above).
+            let base = match base {
+                Some(base) => base,
+                None => match approximate
+                    .as_mut()
+                    .and_then(|matcher| matcher.score(&candidate.title_search))
+                {
+                    Some(score) => score,
+                    None => continue,
+                },
             };
 
             let final_score = rank_score(

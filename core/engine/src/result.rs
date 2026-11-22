@@ -13,6 +13,11 @@ pub struct LaunchResult {
     pub action: LaunchResultAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// How the query matched the name: `exact`, `prefix`, `suffix`,
+    /// `contains`, `fuzzy` or `approximate`. Absent for browse rows, content
+    /// hits and the web row, which are not name matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -67,6 +72,9 @@ impl From<(&Candidate, i64)> for LaunchResult {
             score,
             action,
             icon: candidate.icon.as_deref().map(str::to_string),
+            // Set by the engine when it knows which tier surfaced the row; the
+            // plain conversion has no query to classify against.
+            match_kind: None,
         }
     }
 }

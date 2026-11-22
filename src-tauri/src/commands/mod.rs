@@ -1,3 +1,4 @@
+pub mod autostart;
 pub mod batch;
 pub mod calc;
 pub mod clipboard;
@@ -8,5 +9,6 @@ pub mod ocr;
 pub mod policy;
 pub mod search;
 pub mod settings;
+pub mod shortcut;
 pub mod system;
 pub mod translate;

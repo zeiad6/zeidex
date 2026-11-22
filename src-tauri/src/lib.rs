@@ -11,10 +11,50 @@ use anyhow::anyhow;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::index_service::IndexService;
 use crate::state::AppState;
+
+/// Set once the tray icon exists. Closing the window hides it to the tray only
+/// when there is a tray to restore it from: on a desktop where the tray icon
+/// could not be created, hiding would leave a running process with no visible
+/// surface, so Close is allowed to end the process there.
+struct TrayAvailable(bool);
+
+/// Writes a startup failure where a GUI build can still be diagnosed.
+///
+/// A release build has no console, so `eprintln!` from `main` goes nowhere. The
+/// log sits next to the database (same directory the user's data lives in) and
+/// is append-only and size-capped: a crash loop must not fill the disk.
+pub fn report_startup_failure(message: &str) {
+    use std::io::Write as _;
+
+    const MAX_LOG_BYTES: u64 = 1 << 20;
+    let db_path = state::resolve_db_path();
+    let Some(dir) = db_path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let log = dir.join("zeidex-startup.log");
+    if std::fs::metadata(&log).is_ok_and(|meta| meta.len() > MAX_LOG_BYTES)
+        && std::fs::remove_file(&log).is_err()
+    {
+        return;
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+    {
+        let _ = writeln!(file, "[{stamp}] {message}");
+    }
+}
 
 pub fn run() -> anyhow::Result<()> {
     let app = tauri::Builder::default()
@@ -91,16 +131,22 @@ pub fn run() -> anyhow::Result<()> {
                 eprintln!("zeidex: clipboard monitor did not start: {err}");
             }
 
-            let handle = app.handle().clone();
-            let hotkey_registered = app
-                .global_shortcut()
-                .on_shortcut("Alt+Space", move |_app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        toggle_window(&handle);
-                    }
-                })
-                .map_err(|err| eprintln!("zeidex: could not register Alt+Space: {err}"))
-                .is_ok();
+            // The saved combination is read before registration so a custom
+            // shortcut survives a restart. A saved value the system no longer
+            // allows falls back to the default rather than leaving no way in.
+            let preferred = {
+                let state = app.state::<AppState>();
+                commands::shortcut::saved(&state)
+                    .unwrap_or_else(|| commands::shortcut::DEFAULT_HOTKEY.to_string())
+            };
+            let hotkey_status = commands::shortcut::install(app.handle(), &preferred);
+            if let Some(err) = hotkey_status.error.as_deref() {
+                eprintln!("zeidex: {err}");
+            }
+            let hotkey_registered = hotkey_status.registered;
+            app.manage(commands::shortcut::HotkeyState(std::sync::Mutex::new(
+                hotkey_status,
+            )));
 
             let tray_ready = match build_tray(app.handle()) {
                 Ok(()) => true,
@@ -109,6 +155,7 @@ pub fn run() -> anyhow::Result<()> {
                     false
                 }
             };
+            app.manage(TrayAvailable(tray_ready));
 
             // Both are ways IN to a window that starts hidden. Losing the tray
             // (GNOME without AppIndicator) or the hotkey (Wayland denies the
@@ -125,19 +172,36 @@ pub fn run() -> anyhow::Result<()> {
             index_service.start_initial_index();
             Ok(())
         })
-        // A file dropped on the window is chosen by the user, with the OS as the
-        // picker. Minting it here is what lets the Studio open it: the webview
-        // only ever sees the path it was already told about.
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event
-                && let Some(state) = window.try_state::<AppState>()
-            {
-                for path in paths {
-                    state.paths.mint(path);
+        .on_window_event(|window, event| match event {
+            // Close means "put it away", not "kill the launcher": the hotkey and
+            // the tray are how it comes back, and quitting is an explicit tray
+            // action. Without a tray icon there would be no way back, so on such
+            // a desktop Close keeps its ordinary meaning and ends the process.
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                let has_tray = window
+                    .app_handle()
+                    .try_state::<TrayAvailable>()
+                    .is_some_and(|tray| tray.0);
+                if has_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
             }
+            // A file dropped on the window is chosen by the user, with the OS as
+            // the picker. Minting it here is what lets the Studio open it: the
+            // webview only ever sees the path it was already told about.
+            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+                if let Some(state) = window.try_state::<AppState>() {
+                    for path in paths {
+                        state.paths.mint(path);
+                    }
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            commands::autostart::autostart_status,
+            commands::autostart::autostart_set,
             commands::calc::calc_eval,
             commands::batch::batch_parse,
             commands::batch::batch_import,
@@ -192,11 +256,20 @@ pub fn run() -> anyhow::Result<()> {
             commands::settings::settings_snapshot,
             commands::settings::settings_update,
             commands::settings::settings_pick_folder,
+            commands::shortcut::hotkey_status,
+            commands::shortcut::hotkey_set,
             commands::translate::translate_text,
         ])
         .build(tauri::generate_context!())?;
 
     app.run(|handle, event| {
+        // Release the global grab as the process goes away. The OS would drop
+        // it on exit anyway, but doing it here makes a restart deterministic:
+        // the next instance never races a shortcut the old one still owns.
+        if matches!(&event, tauri::RunEvent::Exit) {
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            let _ = handle.global_shortcut().unregister_all();
+        }
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen {
             has_visible_windows: false,
@@ -221,6 +294,9 @@ fn show_main(handle: &AppHandle) {
     let Some(window) = handle.get_webview_window("main") else {
         return;
     };
+    // A minimized window that is only `show()`n stays minimized on Windows, so
+    // the hotkey would appear to do nothing. Restore first, then raise.
+    let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
     // Lazy indexing walks on first use; "use" is the window becoming visible,
@@ -230,15 +306,34 @@ fn show_main(handle: &AppHandle) {
     }
 }
 
-fn toggle_window(handle: &AppHandle) {
+/// Toggles the launcher: focused means hide, visible-but-unfocused means bring
+/// it forward.
+///
+/// Hiding on every press would throw the panel away when the user reaches for it
+/// from another application - which is the common case for a global launcher.
+pub(crate) fn toggle_window(handle: &AppHandle) {
     let Some(window) = handle.get_webview_window("main") else {
         return;
     };
-    if window.is_visible().unwrap_or(false) {
+    let visible = window.is_visible().unwrap_or(false);
+    let focused = window.is_focused().unwrap_or(false);
+    if visible && focused {
         let _ = window.hide();
     } else {
         show_main(handle);
     }
+}
+
+/// Ends the process from the tray.
+///
+/// The shortcut is released before the exit request so the next launch can
+/// register it even if the OS is slow to reap this process. Everything else is
+/// synchronous or crash-safe (SQLite journals, no unsaved buffers), so `exit`
+/// is the whole shutdown.
+fn quit_app(handle: &AppHandle) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let _ = handle.global_shortcut().unregister_all();
+    handle.exit(0);
 }
 
 fn build_tray(handle: &AppHandle) -> anyhow::Result<()> {
@@ -259,7 +354,7 @@ fn build_tray(handle: &AppHandle) -> anyhow::Result<()> {
 
     TrayIconBuilder::with_id("main-tray")
         .icon(icon)
-        .tooltip("Zeidex Studio")
+        .tooltip("Zeidex Search")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => toggle_window(app),
@@ -267,7 +362,7 @@ fn build_tray(handle: &AppHandle) -> anyhow::Result<()> {
                 let _ = app.emit("zeidex-mode", "ocr");
                 toggle_window(app);
             }
-            "quit" => app.exit(0),
+            "quit" => quit_app(app),
             _ => {}
         })
         .build(handle)?;

@@ -4,7 +4,7 @@ SHELL := /bin/bash
 CORE_MANIFEST := core/Cargo.toml
 APP_DIR := app
 
-.PHONY: help core-test core-clippy core-fmt ocr-test frontend-install frontend-build tauri-dev tauri-build models hero
+.PHONY: help core-test core-clippy core-fmt ocr-test frontend-install frontend-build tauri-dev tauri-build deb models hero
 
 help:
 	@printf "Zeidex developer tasks\n\n"
@@ -51,7 +51,9 @@ tauri-build:
 # naming schemes; see its header for the full reason.
 deb:
 	./app/node_modules/.bin/tauri build --bundles deb
-	./scripts/fix-deb-depends.sh src-tauri/target/release/bundle/deb/*.deb
+	@for deb in src-tauri/target/release/bundle/deb/*.deb; do \
+		./scripts/fix-deb-depends.sh "$$deb"; \
+	done
 
 ocr-test:
 	@test -f third_party/models/ppocrv4_det.onnx || \
@@ -68,8 +70,8 @@ ocr-test:
 	 if [ -n "$$ZEIDEX_ORT_DYLIB" ]; then export ORT_DYLIB_PATH="$$ZEIDEX_ORT_DYLIB"; fi; \
 	 cargo test --manifest-path $(CORE_MANIFEST) -p zeidex-ocr \
 		--test ocr_smoke --test layout_smoke --test table_smoke --test ocr_accuracy \
-		--test arabic_smoke --test pdf_smoke --test photo_smoke \
-		--test photo_quality -- --nocapture && \
+		--test arabic_smoke --test arabic_cer --test pdf_smoke --test pdf_lifecycle \
+		--test pdf_native_text --test photo_smoke --test photo_quality -- --nocapture && \
 	 cargo test --manifest-path $(CORE_MANIFEST) -p zeidex-exporter \
 		--test export ocr_output_exports_to_word_and_excel -- --nocapture
 

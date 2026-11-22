@@ -4,14 +4,14 @@
     <source srcset="assets/brand/zeidex-hero-animated.gif" type="image/gif" />
     <img
       src="assets/brand/zeidex-hero-static.png"
-      alt="Zeidex Studio — offline launcher and document AI"
+      alt="Zeidex Search — offline search, OCR and document AI"
       width="900"
       height="300"
     />
   </picture>
 </p>
 
-<h1 align="center">Zeidex Studio</h1>
+<h1 align="center">Zeidex Search</h1>
 
 <p align="center">
   <strong>Find anything. Launch anything. Turn paper into editable documents — all without leaving your machine.</strong>
@@ -31,13 +31,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zeiad6/zeidex/releases/latest"><b>Download the latest release</b></a><br>
+  <a href="https://github.com/zeiad6/zeidex-search/releases/latest"><b>Download the latest release</b></a><br>
   <sub>Windows — <code>.msi</code> / <code>.exe</code> · Linux — <code>.deb</code> / <code>.AppImage</code></sub>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
-  <a href="https://github.com/zeiad6/zeidex/releases">Releases</a> ·
+  <a href="https://github.com/zeiad6/zeidex-search/releases">Releases</a> ·
   <a href="#what-it-does">What it does</a> ·
   <a href="#document-studio">Document Studio</a> ·
   <a href="#architecture">Architecture</a> ·
@@ -48,7 +48,7 @@
 
 ## The short version
 
-Zeidex Studio is a desktop launcher **and** an offline document AI in one binary.
+Zeidex Search is a desktop launcher **and** an offline document AI in one binary.
 Press <kbd>Alt</kbd>+<kbd>Space</kbd>, type three letters, hit <kbd>Enter</kbd>: an app opens,
 a folder appears, a calculation is on your clipboard. Drop a scan or a PDF into the
 Studio and you get **editable Word and Excel files** — layout, tables, merged cells and
@@ -109,7 +109,7 @@ One input, four modes. <kbd>Tab</kbd> cycles the filter, <kbd>↑</kbd>/<kbd>↓
 
 | | |
 | --- | --- |
-| **Search** | Fuzzy matching with accent/case folding, alias groups (`alias_code=Visual Studio Code\|Cursor\|Zed`), and a usage-aware re-rank so the thing you open every morning wins ties. The index updates itself while the app runs: a file created, renamed or deleted under a watched root is reflected without pressing Reindex. A full walk can be paused, resumed or cancelled from Settings, and cancelling never deletes rows it did not reach. |
+| **Search** | Fuzzy matching with accent/case folding, alias groups (`alias_code=Visual Studio Code\|Cursor\|Zed`), and a usage-aware re-rank so the thing you open every morning wins ties. Every row names its tier: exact, start, end, inside, partial (letters in order) or close (typo tolerant). The end tier ignores the extension, so `2026-014` finds `invoice-2026-014.pdf`, and a query that is only the extension is a format filter, not an ending. The index updates itself while the app runs: a file created, renamed or deleted under a watched root is reflected without pressing Reindex. A full walk can be paused, resumed or cancelled from Settings, and cancelling never deletes rows it did not reach. |
 | **Search inside documents** | The OCR Studio stores the text it recognizes in the local database, so a scan is findable by a phrase inside it (up to two content hits per query, with an excerpt). The switch and a "clear indexed text" action live in Settings → Indexing; nothing leaves the device. |
 | **Calculator** | Type an expression and it is evaluated as you type. <kbd>Enter</kbd> copies the raw, re-parseable number — not the prettified `1,000,000`. |
 | **Clipboard history** | Every text clip is stored locally in SQLite, de-duplicated, searchable, pinnable, and never expires unless you say so. Images are not captured: copying a screenshot leaves the history unchanged. |
@@ -159,6 +159,30 @@ inline instead of being clamped behind your back.
   </tr>
 </table>
 
+### Startup
+
+**Settings → Startup** adds one entry to the operating system's own login list:
+the `HKCU\…\Run` value on Windows, an XDG autostart file on Linux, or a per-user
+LaunchAgent on macOS. The app starts hidden in the tray, so signing in costs no
+window and the launcher is one <kbd>Alt</kbd>+<kbd>Space</kbd> away.
+
+The switch is not a local flag: after every write the shell reads the entry back,
+so a policy that removes it shows as **Inactive** instead of a switch that lies.
+Disabling removes exactly the entry Zeidex created — no service, no second
+executable, no admin prompt. **Quit** from the tray releases the global shortcut
+before the process exits, so a restart never races the previous instance.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/settings-startup.png" alt="Settings → Startup: launch at login, the entry it writes and where it lives" /></td>
+    <td width="50%"><img src="assets/screenshots/settings-shortcut.png" alt="Settings → Search: the global shortcut and its registration status" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Launch at login, the entry it writes, and where it lives.</sub></td>
+    <td align="center"><sub>The global shortcut, with the system's answer shown verbatim.</sub></td>
+  </tr>
+</table>
+
 ### Document Studio
 
 Images and PDFs go in; a structured page comes out. Every box is editable, every table
@@ -174,6 +198,23 @@ content can be searched and exported without pretending it is a scan.
   <tr>
     <td align="center"><sub>Layout regions on the left, editable text on the right. Click a box to jump to its editor.</sub></td>
     <td align="center"><sub>SLANet recovers the grid, including row and column spans, before export.</sub></td>
+  </tr>
+</table>
+
+Every list names the format it is showing. PDF, Word, Excel, PowerPoint, images,
+text, code, archives, audio and video get their own drawn badge — a coloured tile
+with a white page and the format's mark — instead of one generic page icon. The
+badges are SVG, so they stay sharp at any DPI and follow the theme, and they carry
+no vendor artwork.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/studio-formats.png" alt="Document Studio empty state listing the formats it reads, each with its own badge" /></td>
+    <td width="50%"><img src="assets/screenshots/batch-search.png" alt="Batch search results with format badges, scores and export" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>The formats the Studio reads, each with its own badge.</sub></td>
+    <td align="center"><sub>Batch Search: badges, scores and the export in one table.</sub></td>
   </tr>
 </table>
 
@@ -270,7 +311,7 @@ Requirements: Rust (pinned by `rust-toolchain.toml`), Node 20+, and the usual
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
-git clone https://github.com/zeiad6/zeidex.git
+git clone https://github.com/zeiad6/zeidex-search.git
 cd zeidex
 
 # 1. OCR models, once (≈ 35 MB, checksum-verified)
@@ -473,11 +514,11 @@ make core-test && make core-fmt && make core-clippy && make frontend-build
   </tr>
 </table>
 
-Support and suggestions: open an [issue](https://github.com/zeiad6/zeidex/issues) or reach the developer via the [developer card](https://zeidexlink.zeidexsoft.com/zeidex).
+Support and suggestions: open an [issue](https://github.com/zeiad6/zeidex-search/issues) or reach the developer via the [developer card](https://zeidexlink.zeidexsoft.com/zeidex).
 
 ## Licence and attribution
 
-Zeidex Studio is free software under the **GNU General Public License v3.0 or later**.
+Zeidex Search is free software under the **GNU General Public License v3.0 or later**.
 You may use it privately, at work, and commercially; if you distribute it or a modified
 version, the source must stay available under the same licence and the copyright notices
 must be preserved. If you need to embed it in a closed-source product, contact the
@@ -490,8 +531,8 @@ This project is a derivative of [`kunkka19xx/look`](https://github.com/kunkka19x
 library attributions are listed in [NOTICE](NOTICE).
 
 <p align="center">
-  <a href="https://star-history.com/#zeiad6/zeidex&Date">
-    <img src="https://api.star-history.com/svg?repos=zeiad6/zeidex&type=Date" alt="Star history" width="640" />
+  <a href="https://star-history.com/#zeiad6/zeidex-search&Date">
+    <img src="https://api.star-history.com/svg?repos=zeiad6/zeidex-search&type=Date" alt="Star history" width="640" />
   </a>
 </p>
 

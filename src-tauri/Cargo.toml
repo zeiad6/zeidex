@@ -1,7 +1,7 @@
 [package]
 name = "zeidex"
-version = "0.1.0"
-description = "Zeidex Studio — cross-platform launcher and offline document OCR studio"
+version = "0.3.0"
+description = "Zeidex Search — offline file search, OCR and document AI"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"

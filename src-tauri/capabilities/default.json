@@ -17,6 +17,12 @@
     "core:window:allow-set-size",
     "core:window:allow-current-monitor",
     "core:window:allow-minimize",
+    "core:window:allow-unminimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
     "core:window:allow-is-visible",
     "core:tray:default"
   ]

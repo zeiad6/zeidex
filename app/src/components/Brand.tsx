@@ -22,7 +22,7 @@ export function BrandMark({
       viewBox="0 0 32 32"
       className={className}
       role="img"
-      aria-label="Zeidex Studio"
+      aria-label="Zeidex Search"
     >
       <defs>
         <linearGradient id={stroke} x1="4" y1="2" x2="29" y2="30" gradientUnits="userSpaceOnUse">
@@ -71,7 +71,7 @@ export function Wordmark({ compact = false }: { compact?: boolean }) {
         </span>
         {!compact && (
           <span className="mt-1 text-[0.5rem] font-medium uppercase tracking-[0.34em] text-zinc-500">
-            Studio
+            Search
           </span>
         )}
       </span>

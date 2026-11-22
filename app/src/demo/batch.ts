@@ -94,6 +94,7 @@ export interface DemoReport {
     exact: number;
     approximate: number;
     multiple: number;
+    errors: number;
     success_percent: number;
     duration_ms: number;
   };
@@ -268,6 +269,9 @@ export function searchBatch(entries: string[], threshold: number): DemoReport {
       exact: results.filter((entry) => entry.status === "exact").length,
       approximate: results.filter((entry) => entry.matches.length > 0 && entry.status !== "exact").length,
       multiple: results.filter((entry) => entry.total_matches > 1).length,
+      // The Rust report carries this field and the summary card renders it;
+      // omitting it here crashed the whole screen in the browser demo.
+      errors: 0,
       success_percent: results.length ? Math.round((found / results.length) * 1000) / 10 : 0,
       duration_ms: Math.max(1, Date.now() - started),
     },

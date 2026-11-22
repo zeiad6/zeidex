@@ -1,4 +1,5 @@
-import type { PageResult } from "../api";
+import type { LaunchResult, MatchKind, PageResult } from "../api";
+import { demoMatchKind } from "../match-kind";
 import { DEMO_LIST, parseList, searchBatch } from "./batch";
 import {
   ADVISOR,
@@ -33,6 +34,46 @@ export function installMock() {
   // state into the next one, so it is copied once per install.
   let demoPacks = MODEL_PACKS.map((pack) => ({ ...pack, files: pack.files.map((file) => ({ ...file })) }));
   let demoActive = "ppocrv4-mobile";
+  let demoSettings = {
+    version: "0.3.0",
+    platform: "windows",
+    configPath: "C:\\Users\\you\\AppData\\Roaming\\zeidex\\config.json",
+    dbPath: "C:\\Users\\you\\AppData\\Roaming\\zeidex\\zeidex.db",
+    candidateCount: 12804,
+    fileScanDepth: 4,
+    fileScanLimit: 60000,
+    fileScanExtraRoots: ["D:\\Projects"],
+    lazyIndexingEnabled: true,
+    localizedAppNames: true,
+    clipboardHistoryLimit: 200,
+    clipboardFilterSecrets: true,
+    clipboardRetentionDays: 30,
+    clipboardPaused: false,
+    webSearchEnabled: true,
+    webSearchEngine: "duckduckgo",
+    searchEngines: ["duckduckgo", "google", "bing"],
+    limits: {
+      fileScanDepth: [1, 12],
+      fileScanLimit: [1000, 500000],
+      clipboardHistoryLimit: [20, 5000],
+      clipboardRetentionDays: [1, 365],
+    },
+  };
+  let demoHotkey = {
+    accelerator: "Alt+Space",
+    registered: true,
+    error: null as string | null,
+    default: "Alt+Space",
+  };
+  let demoAutostart = {
+    supported: true,
+    enabled: true,
+    mechanism: "Windows registry",
+    location: "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    command: "C:\\Users\\you\\AppData\\Local\\Zeidex\\zeidex.exe",
+    development: false,
+    error: null as string | null,
+  };
   // The PDF run a Cancel click would stop, if one is in flight.
   let pdfRun: { cancelled: boolean } | null = null;
 
@@ -69,14 +110,29 @@ export function installMock() {
     }
   };
 
-  const search = (query: string): typeof RESULTS => {
-    const needle = query.trim().toLowerCase();
+  // The demo bridge mirrors the Rust tiers so the screenshots show the same
+  // "Start / End / Inside / Close" chips the real launcher does.
+  const MATCH_ORDER: Record<MatchKind, number> = {
+    exact: 0,
+    prefix: 1,
+    suffix: 2,
+    contains: 3,
+    fuzzy: 4,
+    approximate: 5,
+  };
+
+  const search = (query: string): LaunchResult[] => {
+    const needle = query.trim();
     if (!needle) return [];
-    return RESULTS.filter(
-      (result) =>
-        result.title.toLowerCase().includes(needle) ||
-        (result.subtitle ?? "").toLowerCase().includes(needle),
-    ).slice(0, 24);
+    const rows: LaunchResult[] = [];
+    for (const result of RESULTS) {
+      const match_kind = demoMatchKind(needle, result.title);
+      if (match_kind) {
+        rows.push({ ...result, match_kind });
+      }
+    }
+    rows.sort((a, b) => MATCH_ORDER[a.match_kind!] - MATCH_ORDER[b.match_kind!]);
+    return rows.slice(0, 24);
   };
 
   const invoke = async (command: string, args: Args = {}) => {
@@ -247,6 +303,35 @@ export function installMock() {
           ],
         };
       }
+      // The Studio's picker goes through the Rust command (the dialog's
+      // extension filter lives there), so the browser demo has to answer that
+      // command as well as the plugin one or "Open file" silently does nothing.
+      case "ocr_pick_file":
+        return DEMO_PDF;
+      // Settings and the shortcut card read real commands; answering them keeps
+      // the screen reviewable in a browser instead of showing its error state.
+      case "settings_snapshot":
+        return demoSettings;
+      case "settings_update": {
+        const patch = (args.patch ?? {}) as Record<string, unknown>;
+        demoSettings = { ...demoSettings, ...patch } as typeof demoSettings;
+        return { settings: demoSettings, reindexRequired: false, warning: null };
+      }
+      case "hotkey_status":
+        return demoHotkey;
+      case "hotkey_set": {
+        const accelerator = args.accelerator;
+        demoHotkey =
+          accelerator === null || accelerator === undefined
+            ? { ...demoHotkey, accelerator: demoHotkey.default, registered: true, error: null }
+            : { ...demoHotkey, accelerator: String(accelerator), registered: true, error: null };
+        return demoHotkey;
+      }
+      case "autostart_status":
+        return demoAutostart;
+      case "autostart_set":
+        demoAutostart = { ...demoAutostart, enabled: Boolean(args.enabled) };
+        return demoAutostart;
       case "ocr_models_status":
         return MODELS;
       case "ocr_page_preview":

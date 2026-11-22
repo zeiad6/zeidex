@@ -269,6 +269,39 @@ body {
     0 1px 8px -2px rgb(34 211 238 / 0.35);
 }
 
+/* Caption buttons for the frameless window. Sized to the Windows caption
+   hit target rather than the 8px icons inside them, so they are easy to hit at
+   any DPI; the close button is the only red hover in the interface. */
+.window-control {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 1.75rem;
+  border-radius: 7px;
+  color: #7c8698;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
+}
+
+.window-control:hover {
+  color: #f4f7fb;
+  background: rgb(255 255 255 / 0.08);
+}
+
+.window-control:active {
+  background: rgb(255 255 255 / 0.13);
+}
+
+.window-control-close:hover {
+  color: #fff;
+  background: #c8353b;
+}
+
+.window-control-close:active {
+  background: #a92a30;
+}
+
 /* Scrollbars: thin, neutral, and invisible until the pointer is near. */
 * {
   scrollbar-width: thin;

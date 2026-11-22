@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use crate::bidi;
 use crate::error::{OcrError, OcrResult};
 use crate::geometry::BBox;
-use crate::layout::{self, PageLayout, RegionKind};
+use crate::layout::{self, PageLayout, Region, RegionKind};
 use crate::onnx::{self, ModelPaths, ModelSet};
 use crate::pdf::{self, Pdfium};
 use crate::table;
@@ -108,6 +108,56 @@ fn pdf_page_window(
     Ok(first - 1..last.min(total))
 }
 
+/// How much real text a page's own layer must hold before OCR is skipped.
+///
+/// Counted in letters and digits, not bytes or lines: a scanned page with a
+/// "Page 3" stamp has a text layer and still needs OCR for its body, so a byte
+/// count would skip exactly the pages that need it most. One short line is
+/// about 24 characters, the point below which OCR could still add something a
+/// search would use.
+const MIN_NATIVE_TEXT_CHARS: usize = 24;
+
+/// The page's own text when it is rich enough to search, `None` when the page
+/// still needs OCR.
+fn usable_native_text(text: &str) -> Option<String> {
+    let meaningful = text.chars().filter(|ch| ch.is_alphanumeric()).count();
+    if meaningful < MIN_NATIVE_TEXT_CHARS {
+        return None;
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// A page read from its own text layer, shaped like an OCR result so callers do
+/// not need two code paths.
+///
+/// There are no per-line boxes to report - the PDF does not expose them through
+/// this API - so the page carries one region covering it. `confidence` is 1.0
+/// because the characters are the file's own, not a guess.
+fn native_page_result(page_index: usize, native: pdf::NativePage, text: String) -> PageResult {
+    PageResult {
+        page_index,
+        width: native.width,
+        height: native.height,
+        layout: PageLayout {
+            width: native.width,
+            height: native.height,
+            regions: vec![Region {
+                kind: RegionKind::Text,
+                bbox: BBox::new(0.0, 0.0, native.width as f32, native.height as f32),
+                confidence: 1.0,
+                text: Some(text.clone()),
+                table: None,
+            }],
+        },
+        text,
+    }
+}
+
 /// A rasterized page preview for the Studio's side-by-side view.
 pub struct PreviewImage {
     pub png: Vec<u8>,
@@ -131,10 +181,10 @@ impl OcrEngine {
     /// express. `config.models_dir` is ignored on this path.
     pub fn with_paths(paths: ModelPaths, config: OcrEngineConfig) -> OcrResult<Self> {
         let models = Arc::new(onnx::load_models(&paths)?);
-        let pdfium = match &config.pdfium_library {
-            Some(path) => Some(Arc::new(pdf::bind_pdfium(Some(path))?)),
-            None => None,
-        };
+        // One pdfium per process, shared by every engine this process builds.
+        // See `pdf::shared_pdfium`: re-binding is what produced
+        // `PdfiumLibraryBindingsAlreadyInitialized` after a model-pack switch.
+        let pdfium = pdf::shared_pdfium(config.pdfium_library.as_deref())?;
         Ok(Self {
             models,
             pdfium,
@@ -270,31 +320,56 @@ impl OcrEngine {
         let mut start = window.start;
         while start < window.end {
             let end = (start + chunk).min(window.end);
-            let images = (start..end)
-                .map(|index| {
-                    stop_requested(cancel)?;
-                    pdf::render_document_page(&document, index as i32, self.dpi)
-                })
-                .collect::<OcrResult<Vec<_>>>()?;
-            let chunk_results: Vec<OcrResult<PageResult>> = images
+            let mut slots: Vec<Option<PageResult>> = (start..end).map(|_| None).collect();
+            let mut images: Vec<(usize, DynamicImage)> = Vec::new();
+
+            // Deciding per page, before rendering: a page whose own text layer
+            // is enough never becomes a 300 DPI bitmap, which is the difference
+            // between a born-digital PDF costing a second and costing a minute.
+            for index in start..end {
+                stop_requested(cancel)?;
+                let native = pdf::native_page_text(&document, index as i32, self.dpi)?;
+                match usable_native_text(&native.text) {
+                    Some(text) => {
+                        slots[index - start] = Some(native_page_result(index, native, text));
+                        progress(PipelineProgress::PageDone {
+                            page: index - window.start,
+                            pages: selected,
+                        });
+                    }
+                    None => images.push((
+                        index,
+                        pdf::render_document_page(&document, index as i32, self.dpi)?,
+                    )),
+                }
+            }
+
+            let chunk_results: Vec<(usize, OcrResult<PageResult>)> = images
                 .par_iter()
-                .enumerate()
-                .map(|(offset, image)| {
-                    stop_requested(cancel)?;
-                    let page = start + offset;
-                    let result = self.process_page_image(page, image);
+                .map(|(index, image)| {
+                    let result = stop_requested(cancel)
+                        .and_then(|()| self.process_page_image(*index, image));
                     // Progress counts work done within this run; the page a
                     // result belongs to is `PageResult::page_index`. A range
                     // therefore reports "3 of 5 selected", never "page 42 of 5".
                     progress(PipelineProgress::PageDone {
-                        page: page - window.start,
+                        page: index - window.start,
                         pages: selected,
                     });
-                    result
+                    (*index, result)
                 })
                 .collect();
-            for result in chunk_results {
-                results.push(result?);
+            for (index, result) in chunk_results {
+                slots[index - start] = Some(result?);
+            }
+            for (offset, slot) in slots.into_iter().enumerate() {
+                let page = slot.ok_or_else(|| {
+                    OcrError::Pdf(format!(
+                        "page {} produced neither native text nor OCR output",
+                        start + offset
+                    ))
+                })?;
+                results.push(page);
             }
             start = end;
         }
@@ -430,7 +505,7 @@ fn has_extension(path: &Path, extension: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{pdf_page_window, stop_requested};
+    use super::{pdf_page_window, stop_requested, usable_native_text};
     use std::sync::atomic::AtomicBool;
 
     #[test]
@@ -476,5 +551,25 @@ mod tests {
         assert!(pdf_page_window(4, Some((3, 2))).is_err());
         assert!(pdf_page_window(4, Some((0, 1))).is_err());
         assert!(pdf_page_window(0, Some((1, 1))).is_err());
+    }
+
+    #[test]
+    fn a_page_stamp_is_not_enough_text_to_skip_ocr() {
+        // A scanned page with this stamp still has a body that only OCR can
+        // read; the threshold counts letters, so "Page 3" stays below it.
+        assert!(usable_native_text("Page 3").is_none());
+        assert!(usable_native_text("   \n\t ").is_none());
+    }
+
+    #[test]
+    fn a_page_of_prose_skips_ocr_and_is_trimmed() {
+        let text = "This page carries a real text layer, so OCR must not run on it.\n";
+        let usable = usable_native_text(text).expect("prose must qualify");
+        assert_eq!(
+            usable,
+            "This page carries a real text layer, so OCR must not run on it."
+        );
+        // Arabic letters count too, and folding is not this layer's job.
+        assert!(usable_native_text("هذا نص عربي كافٍ لتجاوز التعرف الضوئي").is_some());
     }
 }

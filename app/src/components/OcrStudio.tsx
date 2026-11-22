@@ -8,8 +8,11 @@ import {
   type PipelineProgress,
 } from "../api";
 import { count as countLabel } from "../i18n";
+import { fileFormatOf } from "../file-format";
 import { BrandMark } from "./Brand";
+import FileGlyph from "./FileGlyph";
 import { Icon } from "./Icons";
+import WindowControls from "./WindowControls";
 import PagePreviewPane from "./ocr/PagePreview";
 import RegionEditor from "./ocr/RegionEditor";
 import {
@@ -23,6 +26,7 @@ import { parsePageRange } from "../page-range";
 import {
   isSupportedDocument,
   isTextDocument,
+  documentName,
   textDocumentSource,
 } from "../documents";
 
@@ -570,6 +574,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                       : "Run OCR"}
               </button>
             )}
+          <WindowControls rtl={rtl} />
           </span>
         </header>
 
@@ -652,6 +657,31 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
               </span>
             </div>
 
+            {filePath && (
+              <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.02] px-2.5 py-1.5">
+                <FileGlyph path={filePath} size={26} />
+                <div className="min-w-0 flex-1 leading-tight">
+                  <p
+                    className="truncate text-[0.76rem] font-medium text-zinc-200"
+                    dir="auto"
+                    title={documentName(filePath)}
+                  >
+                    {documentName(filePath)}
+                  </p>
+                  <p
+                    className="truncate font-mono text-[0.6rem] text-zinc-600"
+                    dir="ltr"
+                    title={filePath}
+                  >
+                    {filePath}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-md border border-white/10 bg-white/[0.03] px-1.5 py-px text-[0.56rem] font-medium micro-label tracking-[0.12em] text-zinc-400">
+                  {fileFormatOf(filePath).name}
+                </span>
+              </div>
+            )}
+
             <PagePreviewPane
               dataUrl={preview?.data_url ?? null}
               page={preview ?? null}
@@ -688,16 +718,6 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                   {progress.done}/{progress.total}
                 </span>
               </div>
-            )}
-
-            {filePath && (
-              <p
-                className="truncate font-mono text-[0.64rem] text-zinc-600"
-                title={filePath}
-                dir="ltr"
-              >
-                {filePath}
-              </p>
             )}
           </section>
 
@@ -740,6 +760,19 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                     ? "صور و PDF تُقرأ محليًا: تخطيط، أسطر، جداول، ثم نص قابل للتحرير والتصدير إلى Word و Excel."
                     : "Images and PDFs are read on-device — layout, lines, tables — then exported as editable Word and Excel files."}
                 </p>
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  {["sample.pdf", "report.docx", "table.xlsx", "scan.png", "notes.txt"].map(
+                    (sample) => (
+                      <span
+                        key={sample}
+                        className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.02] px-2 py-0.5 text-[0.6rem] text-zinc-500"
+                      >
+                        <FileGlyph path={sample} size={15} />
+                        {fileFormatOf(sample).name}
+                      </span>
+                    ),
+                  )}
+                </div>
                 <div className="mt-1 flex items-center gap-1.5 text-[0.6rem] micro-label tracking-[0.16em] text-zinc-600">
                   <Icon name="lock" size={11} />
                   {rtl ? "بلا شبكة" : "No network"}
@@ -779,7 +812,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             disabled={pages.length === 0}
             className="flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-zinc-300 transition hover:border-sky-400/30 hover:bg-sky-400/10 hover:text-sky-200 disabled:opacity-40"
           >
-            <Icon name="file" size={12} />
+            <FileGlyph path="export.docx" size={15} />
             Word
           </button>
           <button
@@ -788,7 +821,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             disabled={pages.length === 0}
             className="flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-zinc-300 transition hover:border-emerald-400/30 hover:bg-emerald-400/10 hover:text-emerald-200 disabled:opacity-40"
           >
-            <Icon name="table" size={12} />
+            <FileGlyph path="export.xlsx" size={15} />
             Excel
           </button>
           {pages.length > 0 && (

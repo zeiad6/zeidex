@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   SUPPORTED_DOCUMENT_EXTENSIONS,
   documentExtension,
+  documentName,
   isSupportedDocument,
   isTextDocument,
   textDocumentSource,
@@ -72,6 +73,12 @@ test("reads the extension after a dot that is part of the name", () => {
   assert.equal(documentExtension("/home/u/no-dot"), null);
   assert.equal(documentExtension("/home/u/trailing."), null);
   assert.equal(documentExtension(""), null);
+});
+
+test("keeps the last path segment for a file chip", () => {
+  assert.equal(documentName("/home/u/Invoices/invoice-2024.pdf"), "invoice-2024.pdf");
+  assert.equal(documentName("C:\\Users\\u\\فاتورة.pdf"), "فاتورة.pdf");
+  assert.equal(documentName("/home/u/"), "/home/u/");
 });
 
 test("a dotted directory is not mistaken for a file extension", () => {

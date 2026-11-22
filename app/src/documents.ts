@@ -73,6 +73,12 @@ export function documentExtension(path: string): string | null {
   return name.slice(dot + 1).toLowerCase();
 }
 
+/** The last path segment, for a chip that has no room for the whole path. */
+export function documentName(path: string): string {
+  const name = path.split(/[\\/]/).pop() ?? "";
+  return name === "" ? path : name;
+}
+
 export function isSupportedDocument(path: string): boolean {
   const extension = documentExtension(path);
   return (

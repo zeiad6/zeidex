@@ -16,7 +16,9 @@ import {
   type BatchSort,
 } from "../batch-view";
 import { BrandMark } from "./Brand";
+import FileGlyph from "./FileGlyph";
 import { Icon } from "./Icons";
+import WindowControls from "./WindowControls";
 
 /** How many entries are rendered at once. A 2,000-name paste must not put
  *  2,000 rows in the DOM before the user has read the first one. */
@@ -316,6 +318,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
               <Icon name="export" size={13} />
               {exporting ? t("Writing…", "جارٍ الكتابة…") : t("Export Excel", "تصدير Excel")}
             </button>
+          <WindowControls rtl={rtl} />
           </div>
         </header>
 
@@ -827,19 +830,25 @@ function ResultRow({
         />
         <span className="flex min-w-0 items-center gap-1.5">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
-          <span className="truncate text-zinc-100" title={entry.requested}>
+          {/* `dir="auto"` lets an Arabic filename pick an RTL base inside an
+              otherwise LTR row; without it the bidi algorithm reverses the
+              Arabic run and the name reads backwards. */}
+          <span className="truncate text-zinc-100" title={entry.requested} dir="auto">
             {entry.requested}
           </span>
         </span>
         <span className={`truncate ${statusColor}`}>{statusLabel(entry.status, rtl)}</span>
         <span className="min-w-0">
           {best ? (
-            <span className="flex flex-col leading-tight">
-              <span className="truncate text-zinc-300" title={best.path}>
-                {best.name}
-              </span>
-              <span className="truncate text-[0.58rem] text-zinc-600" title={folderOf(best.path)}>
-                {folderOf(best.path)}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <FileGlyph path={best.path} size={18} className="shrink-0" />
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="truncate text-zinc-300" title={best.path} dir="auto">
+                  {best.name}
+                </span>
+                <span className="truncate text-[0.58rem] text-zinc-600" title={folderOf(best.path)}>
+                  {folderOf(best.path)}
+                </span>
               </span>
             </span>
           ) : (
@@ -907,12 +916,15 @@ function ResultRow({
             </span>
             <span />
             <span className="min-w-0">
-              <span className="flex flex-col leading-tight">
-                <span className="truncate text-zinc-300" title={match.path}>
-                  {match.name}
-                </span>
-                <span className="truncate text-[0.58rem] text-zinc-600" title={match.path}>
-                  {folderOf(match.path)}
+              <span className="flex min-w-0 items-center gap-1.5">
+                <FileGlyph path={match.path} size={16} className="shrink-0" />
+                <span className="flex min-w-0 flex-col leading-tight">
+                  <span className="truncate text-zinc-300" title={match.path} dir="auto">
+                    {match.name}
+                  </span>
+                  <span className="truncate text-[0.58rem] text-zinc-600" title={match.path}>
+                    {folderOf(match.path)}
+                  </span>
                 </span>
               </span>
             </span>

@@ -36,6 +36,10 @@ const PATHS = {
   x: "m6 6 12 12M18 6 6 18",
   chevron: "m9 6 6 6-6 6",
   panel: "M4 5h16v14H4V5Zm6 0v14",
+  minimize: "M5 12h14",
+  maximize: "M5 5h14v14H5V5Z",
+  restore: "M8 8h11v11H8V8ZM5 16V5h11",
+  power: "M12 3v9m5.7-6.7a8 8 0 1 1-11.4 0",
 } as const;
 
 export type IconName = keyof typeof PATHS;

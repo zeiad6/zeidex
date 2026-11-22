@@ -1,5 +1,8 @@
 import type { LaunchResult, LaunchResultAction } from "../api";
+import { fileFormatOf } from "../file-format";
+import FileGlyph from "./FileGlyph";
 import { Icon, type IconName } from "./Icons";
+import { MATCH_KINDS } from "../match-kind";
 
 const KIND: Record<string, { icon: IconName; label: string; labelAr: string; tone: string }> = {
   app: {
@@ -109,6 +112,14 @@ export default function ResultList({
     >
       {results.map((result, index) => {
         const meta = KIND[result.kind] ?? KIND.file;
+        // A file row says what the file is: the format badge and its name
+        // replace the generic page and the word "File". Folders, apps and
+        // actions keep the kind icon.
+        const format =
+          result.kind === "file" || result.kind === "document"
+            ? fileFormatOf(result.path || result.title)
+            : null;
+        const match = result.match_kind ? MATCH_KINDS[result.match_kind] : undefined;
         const active = index === selected;
         return (
           <li key={result.id} role="none">
@@ -130,19 +141,41 @@ export default function ResultList({
                 }`}
               />
               <span
-                className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ring-1 ring-inset ${meta.tone}`}
+                className={
+                  format
+                    ? "grid h-9 w-9 shrink-0 place-items-center"
+                    : `grid h-9 w-9 shrink-0 place-items-center rounded-lg ring-1 ring-inset ${meta.tone}`
+                }
               >
-                <Icon name={meta.icon} size={17} />
+                {format ? (
+                  <FileGlyph path={result.path || result.title} size={30} />
+                ) : (
+                  <Icon name={meta.icon} size={17} />
+                )}
               </span>
 
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
-                  <span className="truncate text-[0.9rem] font-medium text-zinc-100">
+                  <span className="truncate text-[0.9rem] font-medium text-zinc-100" dir="auto">
                     {result.title}
                   </span>
                   <span className="shrink-0 rounded-md border border-white/10 px-1.5 py-px text-[0.5625rem] font-medium micro-label tracking-[0.12em] text-zinc-500">
-                    {rtl ? meta.labelAr : meta.label}
+                    {format
+                      ? rtl
+                        ? format.nameAr
+                        : format.name
+                      : rtl
+                        ? meta.labelAr
+                        : meta.label}
                   </span>
+                  {match && (
+                    <span
+                      title={rtl ? match.hintAr : match.hint}
+                      className={`shrink-0 rounded-md border px-1.5 py-px text-[0.5625rem] font-medium micro-label tracking-[0.12em] ${match.tone}`}
+                    >
+                      {rtl ? match.labelAr : match.label}
+                    </span>
+                  )}
                 </span>
                 {result.subtitle && (
                   <span className="mt-0.5 block truncate text-[0.72rem] text-zinc-500">

@@ -699,6 +699,32 @@ impl SqliteStore {
         Ok(settings)
     }
 
+    /// A shell preference with no engine-side path, stored in the generic
+    /// `settings` table (the global shortcut). Absent means "never set".
+    pub fn load_app_setting(&self, key: &str) -> StorageResult<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT value FROM settings WHERE key = ?1")?;
+        let mut rows = stmt.query(params![key])?;
+        Ok(match rows.next()? {
+            Some(row) => Some(row.get(0)?),
+            None => None,
+        })
+    }
+
+    /// Writes one shell preference. `key` is a constant owned by the shell, never
+    /// user input, so this cannot become a general-purpose key/value hole.
+    pub fn save_app_setting(&mut self, key: &str, value: &str) -> StorageResult<()> {
+        let tx = self.write_tx()?;
+        tx.execute(
+            "INSERT INTO settings(key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn save_search_settings(&mut self, settings: SearchSettings) -> StorageResult<()> {
         let tx = self.write_tx()?;
         tx.execute(
@@ -1421,20 +1447,28 @@ fn ensure_column_exists(
     column: &str,
     column_type: &str,
 ) -> StorageResult<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        let name: String = row.get(1)?;
-        if name == column {
-            return Ok(());
-        }
-    }
-
-    conn.execute(
+    // `ALTER TABLE ... ADD COLUMN` is atomic, so two connections opening the
+    // same database at once cannot both add it: the loser gets SQLite's
+    // "duplicate column name". Treating that as success is what makes startup
+    // safe when the shell's store and a worker/test connection open the file
+    // together. Checking `PRAGMA table_info` first would reintroduce the
+    // check-then-act race that produced the error in the first place.
+    match conn.execute(
         &format!("ALTER TABLE {table} ADD COLUMN {column} {column_type}"),
         [],
-    )?;
-    Ok(())
+    ) {
+        Ok(_) => Ok(()),
+        Err(err) if is_duplicate_column_error(&err) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn is_duplicate_column_error(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::SqliteFailure(_, Some(message))
+            if message.contains("duplicate column name")
+    )
 }
 
 /// Stable dedupe id. FNV-1a over the trimmed text - stable and cheap, not
@@ -2092,6 +2126,30 @@ mod tests {
             let mut rows = stmt.query([name]).expect("query table name");
             assert!(rows.next().expect("fetch table row").is_some());
         }
+    }
+
+    /// Two connections can open the same database at once (the shell's store
+    /// and an index worker, or two test threads). Both run the migrations; the
+    /// second `ADD COLUMN` gets "duplicate column name" from SQLite. That is the
+    /// expected outcome of a race the migration must absorb, not a failure that
+    /// aborts startup.
+    #[test]
+    fn adding_a_column_twice_is_idempotent() {
+        let conn = Connection::open_in_memory().expect("open sqlite in memory");
+        conn.execute("CREATE TABLE t (id INTEGER)", [])
+            .expect("create table");
+
+        ensure_column_exists(&conn, "t", "extra", "TEXT").expect("first add");
+        ensure_column_exists(&conn, "t", "extra", "TEXT").expect("second add");
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('t') WHERE name = 'extra'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count the column");
+        assert_eq!(count, 1, "the column exists exactly once");
     }
 
     /// A file SQLite cannot read must not stop the app from starting. The
@@ -2990,5 +3048,39 @@ mod tests {
             assert!(!loaded.web_search_enabled);
             assert_eq!(loaded.web_search_engine, engine);
         }
+    }
+
+    #[test]
+    fn a_shell_setting_round_trips_and_is_overwritten() {
+        let mut store = SqliteStore::open_in_memory().expect("open");
+        assert_eq!(
+            store.load_app_setting("global_shortcut").expect("load"),
+            None,
+            "an unset preference must read as absent, not as an empty string"
+        );
+
+        store
+            .save_app_setting("global_shortcut", "Ctrl+Shift+Z")
+            .expect("save");
+        assert_eq!(
+            store.load_app_setting("global_shortcut").expect("load"),
+            Some("Ctrl+Shift+Z".to_string())
+        );
+
+        // Changing the shortcut must replace the row, not append a second one.
+        store
+            .save_app_setting("global_shortcut", "Alt+Space")
+            .expect("save");
+        assert_eq!(
+            store.load_app_setting("global_shortcut").expect("load"),
+            Some("Alt+Space".to_string())
+        );
+
+        // Keys are independent.
+        store.save_app_setting("other", "value").expect("save");
+        assert_eq!(
+            store.load_app_setting("global_shortcut").expect("load"),
+            Some("Alt+Space".to_string())
+        );
     }
 }

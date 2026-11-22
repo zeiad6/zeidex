@@ -854,7 +854,7 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "zeidex-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "globset",
  "ignore",
@@ -873,14 +873,14 @@ dependencies = [
 
 [[package]]
 name = "zeidex-indexing"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "zeidex-matching"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "unicode-normalization",
 ]
@@ -897,22 +897,23 @@ dependencies = [
 
 [[package]]
 name = "zeidex-ranking"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "zeidex-indexing",
 ]
 
 [[package]]
 name = "zeidex-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rusqlite",
  "zeidex-indexing",
+ "zeidex-matching",
 ]
 
 [[package]]
 name = "zeidex-tools"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
 ]

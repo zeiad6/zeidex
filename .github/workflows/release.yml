@@ -113,7 +113,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: ${{ github.ref_type == 'tag' && format('Zeidex Studio {0}', github.ref_name) || '' }}
+          releaseName: ${{ github.ref_type == 'tag' && format('Zeidex Search {0}', github.ref_name) || '' }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
@@ -135,10 +135,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb
-          dpkg -s zeidex-studio | grep -E '^(Status|Version):'
+          dpkg -s zeidex-search | grep -E '^(Status|Version):'
           test -x /usr/bin/zeidex
-          test -f "/usr/lib/Zeidex Studio/models/ppocrv4_det.onnx"
-          test -f "/usr/lib/Zeidex Studio/lib/libonnxruntime.so"
+          test -f "/usr/lib/Zeidex Search/models/ppocrv4_det.onnx"
+          test -f "/usr/lib/Zeidex Search/lib/libonnxruntime.so"
 
       # tauri-action already attached the pre-repair deb to the draft release;
       # replace it so the published artifact is the installable one.

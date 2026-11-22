@@ -15,6 +15,7 @@ pub use action::{ActionKind, LaunchAction};
 use config::RuntimeConfig;
 use normalize::normalize_for_search;
 pub use platform::paths::path_is_same_or_child;
+use query::ParsedQuery;
 pub use result::{LaunchResult, LaunchResultAction};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -24,6 +25,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// indexing crate for one enum.
 pub use zeidex_indexing::UsageAction;
 use zeidex_indexing::{Candidate, CandidateIdKind, CandidateKind, IndexControl};
+use zeidex_matching::classify_match;
 use zeidex_storage::{SearchSettings, SqliteStore, StorageError};
 
 const INDEX_UPSERT_CHUNK_SIZE: usize = 512;
@@ -92,10 +94,24 @@ impl QueryEngine {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Vec<LaunchResult> {
+        let parsed_query = ParsedQuery::from_input(query);
         let scored = self.search_scored(query, limit);
         scored
             .into_iter()
-            .map(|(candidate, score)| LaunchResult::from((&candidate, score)))
+            .map(|(candidate, score)| {
+                let mut result = LaunchResult::from((&candidate, score));
+                // Only the rows about to be shown are classified: the tier is a
+                // label for the user, not part of the ranking, so paying for it
+                // once per visible row keeps the hot loop untouched.
+                if !parsed_query.normalized_query.is_empty() {
+                    result.match_kind = classify_match(
+                        &parsed_query.normalized_query,
+                        &normalize_for_search(&candidate.title),
+                    )
+                    .map(|kind| kind.as_str().to_string());
+                }
+                result
+            })
             .collect()
     }
 
@@ -1335,6 +1351,137 @@ mod tests {
                 .first()
                 .map(|(candidate, _)| candidate.id.as_ref()),
             Some("file.invoice")
+        );
+    }
+
+    fn match_engine() -> QueryEngine {
+        QueryEngine::new(vec![
+            Candidate::new(
+                "file.report",
+                CandidateKind::File,
+                "report.pdf",
+                "/docs/report.pdf",
+            ),
+            Candidate::new(
+                "file.annual",
+                CandidateKind::File,
+                "annual-report.pdf",
+                "/docs/annual-report.pdf",
+            ),
+            Candidate::new(
+                "file.archive",
+                CandidateKind::File,
+                "annual-report-2025.pdf",
+                "/docs/annual-report-2025.pdf",
+            ),
+            Candidate::new(
+                "file.invoice",
+                CandidateKind::File,
+                "invoice-2026-014.pdf",
+                "/docs/invoice-2026-014.pdf",
+            ),
+        ])
+    }
+
+    #[test]
+    fn a_query_at_the_end_of_the_name_finds_the_file() {
+        let engine = match_engine();
+        let results = engine.search("2026-014", 10);
+        assert_eq!(
+            results.first().map(|result| result.id.as_str()),
+            Some("file.invoice"),
+            "the end of the stem is a match: {results:?}"
+        );
+        assert_eq!(results[0].match_kind.as_deref(), Some("suffix"));
+    }
+
+    #[test]
+    fn name_tiers_rank_prefix_then_suffix_then_containment() {
+        let engine = match_engine();
+        let results = engine.search("report", 10);
+        let ids: Vec<&str> = results.iter().map(|result| result.id.as_str()).collect();
+        let prefix = ids.iter().position(|id| *id == "file.report").unwrap();
+        let suffix = ids.iter().position(|id| *id == "file.annual").unwrap();
+        let contains = ids.iter().position(|id| *id == "file.archive").unwrap();
+        assert!(
+            prefix < suffix && suffix < contains,
+            "prefix {prefix} < suffix {suffix} < contains {contains}: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn the_match_tier_is_reported_on_the_result() {
+        let engine = match_engine();
+        let kind_of = |query: &str, id: &str| {
+            engine
+                .search(query, 10)
+                .into_iter()
+                .find(|result| result.id == id)
+                .and_then(|result| result.match_kind)
+        };
+        assert_eq!(
+            kind_of("report.pdf", "file.report").as_deref(),
+            Some("exact")
+        );
+        assert_eq!(kind_of("report", "file.report").as_deref(), Some("prefix"));
+        assert_eq!(kind_of("report", "file.annual").as_deref(), Some("suffix"));
+        assert_eq!(
+            kind_of("2025", "file.archive").as_deref(),
+            Some("suffix"),
+            "the stem ends with the year"
+        );
+    }
+
+    #[test]
+    fn a_typo_still_surfaces_the_file_and_says_it_is_close() {
+        let engine = match_engine();
+        let results = engine.search("invoise", 10);
+        assert_eq!(
+            results.first().map(|result| result.id.as_str()),
+            Some("file.invoice"),
+            "a transposed/substituted letter is a typo, not a miss: {results:?}"
+        );
+        assert_eq!(
+            results[0].match_kind.as_deref(),
+            Some("approximate"),
+            "the row says it is a close match"
+        );
+    }
+
+    #[test]
+    fn an_exact_match_outranks_a_typo_neighbour() {
+        let engine = match_engine();
+        let results = engine.search("report", 10);
+        let ids: Vec<&str> = results.iter().map(|result| result.id.as_str()).collect();
+        // `report.pdf` is exact/prefix; the typo path never runs for it, so a
+        // query with a real match keeps its real match on top.
+        assert_eq!(ids.first(), Some(&"file.report"));
+    }
+
+    #[test]
+    fn a_short_query_is_never_approximate() {
+        let engine = QueryEngine::new(vec![Candidate::new(
+            "file.notes",
+            CandidateKind::File,
+            "notes.txt",
+            "/docs/notes.txt",
+        )]);
+        assert!(engine.search("nop", 10).is_empty());
+    }
+
+    #[test]
+    fn arabic_typos_still_find_the_document() {
+        let engine = QueryEngine::new(vec![Candidate::new(
+            "file.report",
+            CandidateKind::File,
+            "تقرير-الاجتماع.pdf",
+            "/docs/تقرير-الاجتماع.pdf",
+        )]);
+        let results = engine.search("تقري", 10);
+        assert_eq!(
+            results.first().map(|result| result.id.as_str()),
+            Some("file.report"),
+            "{results:?}"
         );
     }
 }

@@ -6508,7 +6508,7 @@ dependencies = [
 
 [[package]]
 name = "zeidex"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -6540,7 +6540,7 @@ dependencies = [
 
 [[package]]
 name = "zeidex-answers"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "regex",
  "serde",
@@ -6549,7 +6549,7 @@ dependencies = [
 
 [[package]]
 name = "zeidex-batch"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "rayon",
  "rust_xlsxwriter",
@@ -6560,14 +6560,14 @@ dependencies = [
 
 [[package]]
 name = "zeidex-calc"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "zeidex-engine"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "globset",
  "ignore",
@@ -6586,7 +6586,7 @@ dependencies = [
 
 [[package]]
 name = "zeidex-exporter"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "docx-rs",
  "rust_xlsxwriter",
@@ -6597,21 +6597,21 @@ dependencies = [
 
 [[package]]
 name = "zeidex-indexing"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "zeidex-matching"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "unicode-normalization",
 ]
 
 [[package]]
 name = "zeidex-models"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6620,7 +6620,7 @@ dependencies = [
 
 [[package]]
 name = "zeidex-ocr"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "encoding_rs",
@@ -6638,14 +6638,14 @@ dependencies = [
 
 [[package]]
 name = "zeidex-ranking"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "zeidex-indexing",
 ]
 
 [[package]]
 name = "zeidex-storage"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "rusqlite",
  "zeidex-indexing",
@@ -6654,7 +6654,7 @@ dependencies = [
 
 [[package]]
 name = "zeidex-tools"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "serde",
 ]

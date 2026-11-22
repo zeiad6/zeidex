@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-label="Zeidex Studio">
-  <title>Zeidex Studio — offline launcher and document AI</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-label="Zeidex Search">
+  <title>Zeidex Search — offline search, OCR and document AI</title>
   <defs>
     <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0d1626"/>
@@ -57,7 +57,7 @@
     </g>
 
     <text x="216" y="228" font-family="Inter" font-size="82" font-weight="700" letter-spacing="2" fill="#f8fafc">ZEIDEX</text>
-    <text x="220" y="264" font-family="Inter" font-size="17" font-weight="600" letter-spacing="11" fill="#22d3ee">STUDIO</text>
+    <text x="220" y="264" font-family="Inter" font-size="17" font-weight="600" letter-spacing="11" fill="#22d3ee">SEARCH</text>
     <rect x="220" y="288" width="380" height="2" rx="1" fill="url(#rule)"/>
     <text x="220" y="322" font-family="Inter" font-size="20" font-weight="450" fill="#a9b6c9">Search, scan and export without the cloud.</text>
     <text x="220" y="352" font-family="Inter" font-size="20" font-weight="450" fill="#67748a">Launcher · OCR · Word &amp; Excel</text>

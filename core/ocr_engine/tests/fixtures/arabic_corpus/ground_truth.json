@@ -1,0 +1,55 @@
+{
+  "size": 44,
+  "lines": [
+    {
+      "file": "short_greeting.png",
+      "text": "مرحبا بكم في لوميو",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    },
+    {
+      "file": "short_book.png",
+      "text": "كتاب الطالب",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    },
+    {
+      "file": "long_greeting.png",
+      "text": "السلام عليكم ورحمة الله",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    },
+    {
+      "file": "invoice_digits.png",
+      "text": "الفاتورة رقم ١٢٣٤٥",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    },
+    {
+      "file": "amount.png",
+      "text": "المجموع 1250 ريال",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    },
+    {
+      "file": "report_title.png",
+      "text": "تقرير الاجتماع الدوري",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    },
+    {
+      "file": "school.png",
+      "text": "مدرسة الأطفال",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    },
+    {
+      "file": "name_maqsura.png",
+      "text": "مصطفى علي",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    },
+    {
+      "file": "mixed_latin.png",
+      "text": "اختبار PDF",
+      "font": "IBMPlexSansArabic-Bold.ttf"
+    },
+    {
+      "file": "ai_education.png",
+      "text": "الذكاء الاصطناعي في التعليم",
+      "font": "NotoNaskhArabic-Bold.ttf"
+    }
+  ]
+}

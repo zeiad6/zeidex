@@ -10,6 +10,18 @@ export type LaunchResultAction =
   | { type: "translate"; text: string; target_lang: string }
   | { type: "perform_block"; candidate_id: string };
 
+/**
+ * How the query matched a result's name, strongest first. Computed in Rust
+ * (`core/matching::MatchKind`); the UI only labels it.
+ */
+export type MatchKind =
+  | "exact"
+  | "prefix"
+  | "suffix"
+  | "contains"
+  | "fuzzy"
+  | "approximate";
+
 export interface LaunchResult {
   id: string;
   kind: string;
@@ -19,6 +31,7 @@ export interface LaunchResult {
   score: number;
   action: LaunchResultAction;
   icon?: string | null;
+  match_kind?: MatchKind | null;
 }
 
 export interface ClipEntry {
@@ -322,6 +335,28 @@ export interface SettingLimits {
   clipboardRetentionDays: [number, number];
 }
 
+export interface HotkeyStatus {
+  accelerator: string;
+  registered: boolean;
+  error: string | null;
+  default: string;
+}
+
+/** Launch-at-login state, read from the OS rather than a local flag. */
+export interface AutostartStatus {
+  supported: boolean;
+  enabled: boolean;
+  /** Human label for where the entry lives ("Windows registry", …). */
+  mechanism: string;
+  /** Registry key or file path, when there is one. */
+  location: string | null;
+  /** The executable the entry points at. */
+  command: string;
+  /** A debug build points at target/debug; enabling it is a trap. */
+  development: boolean;
+  error: string | null;
+}
+
 export interface AppSettings {
   version: string;
   platform: string;
@@ -396,6 +431,14 @@ export const api = {
     invoke<string | null>("settings_pick_folder", { title }),
   settingsUpdate: (patch: SettingsPatch) =>
     invoke<SettingsUpdate>("settings_update", { patch }),
+  hotkeyStatus: () => invoke<HotkeyStatus>("hotkey_status"),
+  // `null` resets to the default. A combination the OS refuses comes back as a
+  // rejected promise carrying the reason, so the panel can show it verbatim.
+  hotkeySet: (accelerator: string | null) =>
+    invoke<HotkeyStatus>("hotkey_set", { accelerator }),
+  autostartStatus: () => invoke<AutostartStatus>("autostart_status"),
+  autostartSet: (enabled: boolean) =>
+    invoke<AutostartStatus>("autostart_set", { enabled }),
   translateText: (text: string, targetLang: string) =>
     invoke<TranslationOutcome>("translate_text", { text, targetLang }),
   ocrModelsStatus: () => invoke<ModelsStatus>("ocr_models_status"),

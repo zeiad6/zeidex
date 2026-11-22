@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Zeidex Studio">
-  <title>Zeidex Studio</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Zeidex Search">
+  <title>Zeidex Search</title>
   <defs>
     <linearGradient id="rim" x1="18" y1="14" x2="238" y2="244" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#a5f3fc"/>

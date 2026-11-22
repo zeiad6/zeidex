@@ -8,8 +8,8 @@
 <component type="desktop-application">
   <id>com.zeidexsoft.zeidex</id>
 
-  <name>Zeidex Studio</name>
-  <summary>Offline launcher and document OCR studio</summary>
+  <name>Zeidex Search</name>
+  <summary>Offline search, OCR and document AI</summary>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
@@ -20,7 +20,7 @@
 
   <description>
     <p>
-      Zeidex Studio is a launcher and a document studio in one window. It finds
+      Zeidex Search is a launcher and a document studio in one window. It finds
       applications, files and folders as you type, keeps a local clipboard
       history, and evaluates arithmetic inline.
     </p>
@@ -35,10 +35,10 @@
     </p>
   </description>
 
-  <launchable type="desktop-id">Zeidex Studio.desktop</launchable>
+  <launchable type="desktop-id">Zeidex Search.desktop</launchable>
 
   <url type="homepage">https://zeidexsoft.com</url>
-  <url type="bugtracker">https://github.com/zeiad6/zeidex/issues</url>
+  <url type="bugtracker">https://github.com/zeiad6/zeidex-search/issues</url>
 
   <categories>
     <category>Utility</category>
@@ -70,6 +70,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.3.0" date="2026-11-22">
+      <description>
+        <p>Arabic OCR re-reads low-confidence lines word by word (CER 15.57 % to 0.60 %), every file row carries its own format badge, the app can start with the system, and search reports whether a name matches at the start, the end, inside, or a typo away.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-11-21">
       <description>
         <p>First packaged release: launcher, clipboard history, calculator, translation and the offline OCR studio.</p>

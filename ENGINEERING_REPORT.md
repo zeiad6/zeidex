@@ -1,5 +1,12 @@
 # Zeidex Studio — Engineering Report
 
+> **Historical document.** This report records the 0.1.0 line, when the product
+> was called *Zeidex Studio*. In 0.3.0 the product became **Zeidex Search** and
+> the repository `zeidex-search`; package and install paths quoted below are the
+> old ones and are kept as the evidence they were at the time. The binary
+> (`zeidex`), the identifier (`com.zeidexsoft.zeidex`) and the `~/.zeidex` data
+> directory are unchanged.
+
 **Date:** 2026-11-22  
 **Repository:** `LumioZEIDEX` (branch `main`)  
 **Scope:** previous-audit verification, three-tier local OCR, hardware advisor, batch search, Excel export, three hardening rounds (two driven by independent code reviews, one closing the read-side path trust and the contrast-token gap), tests, packaging.  
@@ -500,8 +507,8 @@ Test totals: **679 automated tests passed, 0 failed** (548 core + 64 shell + 67 
 
 ## 8. Build and Release Status
 
-- **Published:** [`v0.1.0`](https://github.com/zeiad6/zeidex/releases/tag/v0.1.0) — the tag now points at `4469de5`, and all six assets were replaced with builds of that commit. The previous four x64 assets and their `SHA256SUMS` were deleted first; nothing from the old build remains on the release.
-- **x64 bundles, built by CI:** run [`45009610649`](https://github.com/zeiad6/zeidex/actions/runs/45009610649) from tag `v0.1.0` — both jobs (Linux, Windows) succeeded and uploaded:
+- **Published:** [`v0.1.0`](https://github.com/zeiad6/zeidex-search/releases/tag/v0.1.0) — the tag now points at `4469de5`, and all six assets were replaced with builds of that commit. The previous four x64 assets and their `SHA256SUMS` were deleted first; nothing from the old build remains on the release.
+- **x64 bundles, built by CI:** run [`45009610649`](https://github.com/zeiad6/zeidex-search/actions/runs/45009610649) from tag `v0.1.0` — both jobs (Linux, Windows) succeeded and uploaded:
   - `Zeidex.Studio_0.1.0_amd64.deb` — 51,153,890 bytes (48.8 MiB), installed size 91,295 KB, depends `libayatana-appindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0`, SHA-256 `4cca3a6df419027ebeb05b0405b984ee3dbbb58f502436d57218bac7b4523b2f`.
   - `Zeidex.Studio_0.1.0_amd64.AppImage` — 132,495,864 bytes (126.4 MiB), SHA-256 `1e2dd7a8f9384301f63af1c8dc678b7b32aea7e1a9b6d19064a1d52da4de0cec`.
   - `Zeidex.Studio_0.1.0_x64_en-US.msi` — 50,704,384 bytes (48.4 MiB), SHA-256 `0b0dee5a969488b9e2365f318edf76e7cfbc4d153858d1b4162ff2af745f60b8`.

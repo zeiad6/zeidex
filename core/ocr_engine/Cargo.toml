@@ -5,7 +5,7 @@ edition = "2024"
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-version = "0.1.0"
+version.workspace = true
 
 [dependencies]
 anyhow = "1"
@@ -32,6 +32,7 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 # The pack smoke test resolves a downloaded pack through the same catalog the
 # installer writes, so the layout it exercises is the real one.
 tempfile = "3"
+zeidex-matching = { path = "../matching" }
 zeidex-models = { path = "../models" }
 
 [features]

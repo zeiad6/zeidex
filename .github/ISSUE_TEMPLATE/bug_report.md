@@ -32,7 +32,7 @@ assignees: ""
 
 - OS and version: <!-- e.g. Ubuntu 24.04, Windows 11 23H2, macOS 15.2 -->
 - Architecture: <!-- x86_64 / arm64 -->
-- Zeidex Studio version or commit SHA:
+- Zeidex Search version or commit SHA:
 - Install method: <!-- source build / .deb / .AppImage / .msi / .dmg -->
 - Area: <!-- launcher search, calculator, clipboard, translation, OCR Studio, export -->
 

@@ -13,10 +13,22 @@
 
 use std::path::{Path, PathBuf};
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 use super::policy::PathPolicy;
+
+/// The window that owns every native dialog this module opens.
+///
+/// An unowned dialog is a separate top-level window on Windows: the OS has no
+/// reason to keep it above the application that asked for it, which is how a
+/// picker ends up behind Zeidex. `set_parent` passes the main window handle to
+/// the platform dialog, making it modal to that window and keeping it in front.
+/// This replaces the old workaround of forcing the launcher always-on-top,
+/// which only made the ordering worse for the dialog.
+fn dialog_parent(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_webview_window("main")
+}
 
 /// Opens a single-file picker and returns the chosen path.
 ///
@@ -55,6 +67,9 @@ pub fn pick_folder(
     title: Option<String>,
 ) -> Result<Option<PathBuf>, String> {
     let mut builder = app.dialog().file();
+    if let Some(window) = dialog_parent(app) {
+        builder = builder.set_parent(&window);
+    }
     if let Some(title) = title.filter(|value| !value.trim().is_empty()) {
         builder = builder.set_title(title);
     }
@@ -96,6 +111,9 @@ fn builder(
     extensions: &[&str],
 ) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
     let mut builder = app.dialog().file();
+    if let Some(window) = dialog_parent(app) {
+        builder = builder.set_parent(&window);
+    }
     if let Some(title) = title.filter(|value| !value.trim().is_empty()) {
         builder = builder.set_title(title);
     }

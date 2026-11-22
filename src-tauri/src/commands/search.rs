@@ -110,6 +110,8 @@ fn merge_document_hits(results: &mut Vec<LaunchResult>, hits: Vec<DocumentHit>) 
                 path: hit.path.clone(),
             },
             icon: None,
+            // A content hit matched the text inside the file, not its name.
+            match_kind: None,
         });
     }
 }
@@ -146,6 +148,8 @@ fn web_search_result(query: &str, settings: SearchSettings) -> Option<LaunchResu
             query: trimmed.to_string(),
         },
         icon: None,
+        // The web row is not a name match against an indexed candidate.
+        match_kind: None,
     })
 }
 
@@ -310,6 +314,7 @@ mod tests {
                 path: "/docs/report.pdf".to_string(),
             },
             icon: None,
+            match_kind: None,
         }];
         merge_document_hits(&mut results, vec![hit("/docs/report.pdf", "revenue grew")]);
         assert_eq!(results.len(), 1, "the same file is not listed twice");

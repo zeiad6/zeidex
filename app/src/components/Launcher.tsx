@@ -7,6 +7,7 @@ import { Wordmark } from "./Brand";
 import ClipboardPanel from "./ClipboardPanel";
 import { Icon } from "./Icons";
 import ResultList from "./ResultList";
+import WindowControls from "./WindowControls";
 import TranslationPanel from "./TranslationPanel";
 
 const TABS: { id: Tab; label: string; rtlLabel: string }[] = [
@@ -110,6 +111,33 @@ export default function Launcher({
   // Ticket for clipboard list reads: a response that started before a delete, a
   // pin, or a newer read must not overwrite the newer state.
   const clipboardSeq = useRef(0);
+
+  // A hotkey or the tray's Show raises the window with whatever had focus
+  // before, which is never the query box. A launcher is only useful if typing
+  // goes straight into search, so every focus regain re-arms the input and
+  // selects the old query: the next keystroke replaces it instead of appending.
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    win
+      .onFocusChanged(({ payload: focused }) => {
+        if (!focused) return;
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      })
+      .then((fn) => {
+        if (active) unlisten = fn;
+        else fn();
+      })
+      .catch(() => {
+        // Browser demo: no native window to subscribe to.
+      });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
   // `tr"` switches the panel from search to translation; the prefix is consumed
   // and the rest of the query is the text to translate.
@@ -415,6 +443,7 @@ export default function Launcher({
             >
               {rtl ? "EN" : "ع"}
             </button>
+            <WindowControls rtl={rtl} />
           </div>
         </header>
 
