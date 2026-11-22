@@ -68,7 +68,8 @@ ocr-test:
 	 if [ -n "$$ZEIDEX_ORT_DYLIB" ]; then export ORT_DYLIB_PATH="$$ZEIDEX_ORT_DYLIB"; fi; \
 	 cargo test --manifest-path $(CORE_MANIFEST) -p zeidex-ocr \
 		--test ocr_smoke --test layout_smoke --test table_smoke --test ocr_accuracy \
-		--test arabic_smoke --test pdf_smoke --test photo_smoke -- --nocapture && \
+		--test arabic_smoke --test pdf_smoke --test photo_smoke \
+		--test photo_quality -- --nocapture && \
 	 cargo test --manifest-path $(CORE_MANIFEST) -p zeidex-exporter \
 		--test export ocr_output_exports_to_word_and_excel -- --nocapture
 

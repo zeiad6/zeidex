@@ -46,6 +46,21 @@ that could not answer. The shell keeps one cancellation token at a time and
 compares it by pointer, so a run that finishes late cannot clear the token of
 the run that replaced it.
 
+## Photo input
+
+A phone photo is not a flatbed scan, so the pipeline was measured against
+degraded versions of the known twelve-cell table fixture
+(`core/ocr_engine/tests/photo_quality.rs`, run by `make ocr-test`): low
+contrast, a lighting gradient, 1.6 px blur, deterministic sensor noise, JPEG at
+quality 45, and all of them combined. The combined case still reads 10 of 12
+cells and every single degradation reads all 12 except sensor noise at 11, so
+no preprocessing step is enabled. Contrast stretching, sharpening or denoising
+would each change pixels the models already read correctly, and there is no
+evidence yet that a transform recovers the two lost cells instead of costing
+others. The test keeps the measured floor as a regression gate: any future
+enhancement has to beat it on this same fixture, and the numbers are printed on
+every run so a model update is visible rather than assumed.
+
 ## The two panes
 
 **Left — the page.** `ocr_page_preview` renders the page to a PNG data URL, so
