@@ -888,4 +888,44 @@ mod tests {
         let second = environment().expect("a second environment handle");
         drop((first, second));
     }
+
+    /// A machine without `libonnxruntime.so` must get an error, not a dead
+    /// process. `ort` panics inside `build()`, and the guard that turns the
+    /// panic into `RuntimeUnavailable` is only reachable before the shared
+    /// environment exists — a `OnceLock` cannot be unset — so the test re-runs
+    /// itself in a child process with a bogus `ORT_DYLIB_PATH`.
+    #[test]
+    fn a_missing_runtime_is_an_error_not_a_panic() {
+        const CHILD_FLAG: &str = "ZEIDEX_ONNX_MISSING_CHILD";
+        if std::env::var_os(CHILD_FLAG).is_some() {
+            match environment() {
+                // A statically linked runtime ignores the path; there is
+                // nothing to prove in that configuration.
+                Ok(_) => println!("skip: this build does not load ORT_DYLIB_PATH"),
+                Err(OcrError::RuntimeUnavailable(_)) => println!("unavailable, as expected"),
+                Err(other) => panic!("expected RuntimeUnavailable, got {other}"),
+            }
+            return;
+        }
+        let exe = std::env::current_exe().expect("test binary path");
+        let output = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "onnx::tests::a_missing_runtime_is_an_error_not_a_panic",
+                "--nocapture",
+            ])
+            .env(CHILD_FLAG, "1")
+            .env(
+                "ORT_DYLIB_PATH",
+                "/nonexistent/libonnxruntime-does-not-exist.so",
+            )
+            .output()
+            .expect("spawn the test binary");
+        assert!(
+            output.status.success(),
+            "the child process died instead of returning an error (status {:?}):\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
