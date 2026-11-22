@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use image::{DynamicImage, GenericImageView, Rgb, RgbImage};
 #[cfg(any(feature = "cuda", feature = "directml"))]
@@ -130,6 +130,62 @@ pub fn execution_providers() -> Vec<ExecutionProviderDispatch> {
     vec![CPU::default().build()]
 }
 
+/// The process-wide ONNX Runtime environment.
+///
+/// ONNX Runtime allows exactly one environment per process and `ort::init()`
+/// refuses a second `build()`, so the environment has to outlive any single
+/// engine. It does not by accident: the shell drops the cached engine when the
+/// user activates or removes a model pack (`AppState::reset_ocr_engine`), and
+/// the next OCR run builds a new one. Building the environment once and cloning
+/// the handle is what lets a pack switch take effect without restarting the app;
+/// creating it per engine made the second load fail with "only one environment
+/// is allowed per process", which left OCR dead until a restart.
+static ENVIRONMENT: OnceLock<ort::environment::Environment> = OnceLock::new();
+
+/// Serialises the first initialisation so two threads racing to load the engine
+/// cannot both reach `build()`; the loser would get the "one environment" error
+/// rather than a working handle.
+static ENVIRONMENT_INIT: Mutex<()> = Mutex::new(());
+
+/// The shared environment, built on first use.
+fn environment() -> OcrResult<ort::environment::Environment> {
+    if let Some(environment) = ENVIRONMENT.get() {
+        return Ok(environment.clone());
+    }
+    let _guard = ENVIRONMENT_INIT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(environment) = ENVIRONMENT.get() {
+        return Ok(environment.clone());
+    }
+    let built = ort::init()
+        .with_name("zeidex-ocr")
+        .with_execution_providers(execution_providers())
+        .build()?;
+    let _ = ENVIRONMENT.set(built.clone());
+    Ok(built)
+}
+
+/// Threads one ONNX session may use.
+///
+/// The pipeline parallelises pages with rayon and guards every session with a
+/// mutex, so at most three sessions run at once (detection and the two
+/// recognizers). Dividing the cores between them keeps the process near the core
+/// count instead of spawning `sessions x cores` threads - five sessions on a
+/// seven-core machine meant up to 35 ORT threads, each with its own arena, which
+/// is the wrong shape for the low-RAM devices the Compact tier targets.
+///
+/// It also fixes a startup error on this class of host: when the thread count is
+/// left to auto-detection ORT tries to pin threads with
+/// `pthread_setaffinity_np`, which fails in containers and on Android with
+/// "Specify the number of threads explicitly so the affinity is not set".
+fn intra_threads() -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+    (cores / 3).clamp(1, 4)
+}
+
 /// Loads every model. `ort::Environment` is created once and shared; with the
 /// `load-dynamic` feature the ONNX Runtime shared library is loaded at runtime,
 /// so no GPU runtime is required to build or run on CPU.
@@ -141,10 +197,7 @@ pub fn load_models(paths: &ModelPaths) -> OcrResult<ModelSet> {
         )));
     }
 
-    let environment = ort::init()
-        .with_name("zeidex-ocr")
-        .with_execution_providers(execution_providers())
-        .build()?;
+    let environment = environment()?;
 
     let providers = execution_providers();
     let det = load_session(&environment, &paths.det, &providers)?;
@@ -177,6 +230,10 @@ fn load_session(
 ) -> OcrResult<Session> {
     let mut builder = Session::builder(environment)?
         .with_execution_providers(providers)
+        .map_err(|err| OcrError::Model(err.to_string()))?
+        // Set explicitly; see `intra_threads`. Left to auto-detection ORT pins
+        // threads to cores, which fails in containers and on Android.
+        .with_intra_threads(intra_threads())
         .map_err(|err| OcrError::Model(err.to_string()))?;
     Ok(builder.commit_from_file(path)?)
 }
@@ -800,5 +857,22 @@ mod tests {
         assert_eq!(chosen.0, "١٢٣٤");
         let chosen = choose_recognition(("Total".to_string(), 0.80), ("tl".to_string(), 0.30));
         assert_eq!(chosen.0, "Total");
+    }
+
+    /// ONNX Runtime allows one environment per process, and the shell rebuilds
+    /// the engine whenever the user activates or removes a model pack
+    /// (`AppState::reset_ocr_engine`). Taking the environment twice is therefore
+    /// the difference between a pack switch that works and one that leaves OCR
+    /// dead until the app is restarted.
+    #[test]
+    fn the_environment_is_handed_out_more_than_once() {
+        let Ok(first) = environment() else {
+            // No ONNX Runtime on this host: the rest of the suite skips the same
+            // way rather than failing a machine that cannot run the models.
+            eprintln!("skipping: ONNX Runtime is not loadable here");
+            return;
+        };
+        let second = environment().expect("a second environment handle");
+        drop((first, second));
     }
 }

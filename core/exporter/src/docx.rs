@@ -107,8 +107,16 @@ fn mark_rtl_tables(package: &mut Vec<u8>, rtl_tables: &[bool]) -> ExportResult<(
         let mut writer = zip::ZipWriter::new(&mut rewritten_package);
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index)?;
-            writer.start_file(entry.name().to_string(), options)?;
-            if entry.name() == DOCUMENT_XML {
+            // zip 9 made the name fallible: a local header may disagree with
+            // the central directory, and trusting the local one is how an
+            // archive smuggles a different path past the caller. A package we
+            // just wrote has no such trick, so an error here is corruption.
+            let name = entry.name().map_err(|err| {
+                ExportError::Invalid(format!("a package entry has no readable name: {err}"))
+            })?;
+            let name = name.into_owned();
+            writer.start_file(&name, options)?;
+            if name == DOCUMENT_XML {
                 writer.write_all(rewritten.as_bytes())?;
             } else {
                 std::io::copy(&mut entry, &mut writer)?;

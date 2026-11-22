@@ -23,7 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Re-exported so a shell can validate a usage verb without depending on the
 /// indexing crate for one enum.
 pub use zeidex_indexing::UsageAction;
-use zeidex_indexing::{Candidate, CandidateIdKind, CandidateKind};
+use zeidex_indexing::{Candidate, CandidateIdKind, CandidateKind, IndexControl};
 use zeidex_storage::{SearchSettings, SqliteStore, StorageError};
 
 const INDEX_UPSERT_CHUNK_SIZE: usize = 512;
@@ -242,30 +242,56 @@ impl QueryEngine {
         Self::bootstrap_sqlite_scoped(path, BootstrapScope::ALL)
     }
 
-    /// Like `bootstrap_sqlite`, but only re-walks the sources selected by `scope`
-    /// and only prunes stale rows whose candidate id matches one of those sources.
-    /// Used by the file watcher so that, e.g., a change inside an apps directory
-    /// does not force a full rescan of every file root.
-    pub fn bootstrap_sqlite_scoped(
+    /// A full walk the caller can pause or cancel.
+    ///
+    /// Cancelling is safe by construction: the stale-row sweep is skipped, so a
+    /// stopped walk leaves the rows it did not reach in place. Those rows are
+    /// still real files; the index is incomplete, not corrupted, and the next
+    /// complete walk fixes it.
+    pub fn bootstrap_sqlite_controlled(
         path: impl AsRef<Path>,
         scope: BootstrapScope,
-    ) -> Result<(), StorageError> {
+        control: &std::sync::Arc<IndexControl>,
+    ) -> Result<BootstrapOutcome, StorageError> {
+        Self::bootstrap_sqlite_controlled_with(path, &RuntimeConfig::load_cached(), scope, control)
+    }
+
+    /// The controlled walk with an explicit config. The shell uses the cached
+    /// config; tests use this so a walk of a fixture never depends on the
+    /// machine's real scan roots.
+    pub fn bootstrap_sqlite_controlled_with(
+        path: impl AsRef<Path>,
+        runtime_config: &RuntimeConfig,
+        scope: BootstrapScope,
+        control: &std::sync::Arc<IndexControl>,
+    ) -> Result<BootstrapOutcome, StorageError> {
         let mut store = SqliteStore::open(path)?;
-        let runtime_config = RuntimeConfig::load_cached();
         let run_started_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|err| StorageError::Data(format!("system time error: {err}")))?
             .as_secs() as i64;
+
+        // A walk that is already cancelled must not clear the demo rows or
+        // touch a single candidate.
+        if !control.checkpoint() {
+            return Ok(BootstrapOutcome::Cancelled { discovered: 0 });
+        }
+
         if store.is_demo_seeded()? {
             // Clear demo rows first, then progressively stream real candidates.
             store.replace_candidates(&[])?;
         }
 
-        let (rx, producer_handle) =
-            index::discover_candidates_stream_scoped(&runtime_config, scope).into_parts();
+        let (rx, producer_handle) = index::discover_candidates_stream_controlled(
+            runtime_config,
+            scope,
+            Some(std::sync::Arc::clone(control)),
+        )
+        .into_parts();
         let mut seen = HashSet::new();
         let mut chunk = Vec::with_capacity(INDEX_UPSERT_CHUNK_SIZE);
         let mut discovered_count = 0usize;
+        let mut cancelled = false;
         for candidate in rx {
             if !seen.insert(candidate.id.clone()) {
                 continue;
@@ -275,6 +301,12 @@ impl QueryEngine {
             if chunk.len() >= INDEX_UPSERT_CHUNK_SIZE {
                 store.upsert_candidates_indexed(&chunk, Some(run_started_at))?;
                 chunk.clear();
+                // Check between chunks, not between rows: one checkpoint per
+                // 512 writes keeps the pause responsive without a lock per row.
+                if !control.checkpoint() {
+                    cancelled = true;
+                    break;
+                }
             }
         }
 
@@ -286,24 +318,13 @@ impl QueryEngine {
             eprintln!("zeidex index: producer worker panicked: {err:?}");
         }
 
-        // Stale-row sweep. The `ALL` branch keeps the "discovered something"
-        // guard as a crash-shaped failsafe - if a full bootstrap silently
-        // produced zero candidates we'd rather leave the DB alone than wipe
-        // every row. Scoped paths are different: when the watcher fires an
-        // `APPS_ONLY` refresh, "zero discovered" is the legitimate "user just
-        // uninstalled their last app in this root" outcome, and we must still
-        // sweep the matching prefixes or the deleted row lingers forever
-        // (only an `ALL` refresh would otherwise catch it).
-        // Prune by the `seen` set rather than the old "indexed_at < run_started"
-        // sweep: the change-detecting upsert no
-        // longer bumps indexed_at on unchanged rows, so only "not seen this scan"
-        // reliably means "gone". delete_unseen_candidates keeps the indexed_at<run
-        // guard to preserve i64::MAX pinned rows. `seen` is already collected above
-        // for dedup, so this reuses it.
-        // This branch is the whole-index path and still needs `seen`. The
-        // watcher does not come through here: it calls `refresh_paths`, which
-        // deletes exactly the ids under the reported paths and never walks the
-        // tree to decide what is gone.
+        if cancelled {
+            return Ok(BootstrapOutcome::Cancelled {
+                discovered: discovered_count,
+            });
+        }
+
+        // Stale-row sweep, unchanged: only a completed walk knows what is gone.
         let prefixes = scope.id_prefixes();
         if scope.is_all() {
             if discovered_count > 0 {
@@ -317,7 +338,25 @@ impl QueryEngine {
         let _ = store.prune_usage_events_older_than(usage_cutoff)?;
         let _ = store.prune_usage_events_to_max(MAX_USAGE_EVENT_ROWS)?;
 
-        Ok(())
+        Ok(BootstrapOutcome::Complete {
+            discovered: discovered_count,
+        })
+    }
+
+    /// Like `bootstrap_sqlite`, but only re-walks the sources selected by `scope`
+    /// and only prunes stale rows whose candidate id matches one of those sources.
+    /// Used by the file watcher so that, e.g., a change inside an apps directory
+    /// does not force a full rescan of every file root.
+    ///
+    /// The unscoped signature is kept for callers that have nothing to cancel;
+    /// it delegates to [`Self::bootstrap_sqlite_controlled`] with a fresh switch,
+    /// so both paths share one implementation.
+    pub fn bootstrap_sqlite_scoped(
+        path: impl AsRef<Path>,
+        scope: BootstrapScope,
+    ) -> Result<(), StorageError> {
+        Self::bootstrap_sqlite_controlled(path, scope, &std::sync::Arc::new(IndexControl::new()))
+            .map(|_| ())
     }
 
     /// Applies a filesystem delta without walking every root.
@@ -485,6 +524,28 @@ impl IndexedCandidate {
 pub struct RefreshOutcome {
     pub removed: usize,
     pub added: usize,
+}
+
+/// How a full walk ended. `discovered` is what the walk produced and wrote, not
+/// what the database holds: a cancelled walk keeps the rows it did not reach, so
+/// the total is larger than this number by design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstrapOutcome {
+    Complete { discovered: usize },
+    Cancelled { discovered: usize },
+}
+
+impl BootstrapOutcome {
+    pub fn discovered(self) -> usize {
+        match self {
+            BootstrapOutcome::Complete { discovered } => discovered,
+            BootstrapOutcome::Cancelled { discovered } => discovered,
+        }
+    }
+
+    pub fn was_cancelled(self) -> bool {
+        matches!(self, BootstrapOutcome::Cancelled { .. })
+    }
 }
 
 /// Selects which discovery sources `bootstrap_sqlite_scoped` should re-walk.

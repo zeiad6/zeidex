@@ -1,7 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
     "module": "CommonJS",
     "moduleResolution": "node",
     "outDir": "../.test-build",
@@ -13,10 +16,13 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "files": [
     "src/batch-view.ts",
+    "src/contrast.test.ts",
     "src/batch-view.test.ts",
     "src/documents.ts",
     "src/documents.test.ts",
@@ -28,6 +34,8 @@
     "src/page-range.test.ts",
     "src/settings-draft.ts",
     "src/settings-draft.test.ts",
+    "src/theme.ts",
+    "src/theme.test.ts",
     "src/window-size.ts",
     "src/window-size.test.ts"
   ]

@@ -197,8 +197,8 @@ export default function Models({ rtl, onBack }: ModelsProps) {
           kind: result.ok ? "notice" : "error",
           text: result.ok
             ? t(
-                `${pack.name}: ${result.checkedFiles} files verified.`,
-                `${pack.name_ar}: تم التحقق من ${result.checkedFiles} ملفات.`,
+                `${pack.name}: ${result.checked_files} files verified.`,
+                `${pack.name_ar}: تم التحقق من ${result.checked_files} ملفات.`,
               )
             : t(
                 `${pack.name} has problems.`,

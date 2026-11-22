@@ -82,6 +82,24 @@ pub fn staging_dir(models_root: &Path, pack: &ModelPack) -> PathBuf {
         .join(format!(".staging-{}", pack.id))
 }
 
+/// Free space a pack needs before a download may start, in MiB.
+///
+/// `prepare_file` reads a download into memory and writes the prepared copy
+/// beside it before the `.part` is removed, so the peak is the sum of the files
+/// plus one extra copy of the largest. Adding only a fixed 128 MB covered that
+/// for today's packs by about ten megabytes, which is luck rather than a rule.
+///
+/// The advisor and the downloader both call this. They used to disagree — the
+/// advisor demanded two gigabytes of headroom while the downloader demanded 128
+/// MB — so a device could be told a pack did not fit and then be allowed to
+/// install it.
+pub fn disk_requirement_mb(pack: &ModelPack) -> u64 {
+    /// Manifest, active marker and filesystem slack.
+    const HEADROOM_MB: u64 = 128;
+    let largest = pack.files.iter().map(|file| file.bytes).max().unwrap_or(0);
+    (pack.download_bytes() + largest).div_ceil(1024 * 1024) + HEADROOM_MB
+}
+
 /// Where a pack's raw download for one file is kept while it is in flight.
 pub fn part_path(dir: &Path, file: &PackFile) -> PathBuf {
     dir.join(format!("{}.part", file.name))
@@ -98,9 +116,14 @@ pub fn status(models_root: &Path, pack: &ModelPack) -> PackStatus {
     for file in pack.files {
         let path = dir.join(file.name);
         let actual = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
-        // A dictionary extracted from YAML is not the downloaded file, so its
-        // catalog size is only a lower bound; presence is what matters.
-        let present = path.is_file() && (actual > 0 || file.bytes == 0);
+        // The size is compared, not just the presence. A file truncated by an
+        // interrupted copy or a damaged filesystem used to satisfy `actual > 0`,
+        // so the pack reported Installed, the downloader refused to repair it,
+        // and activation then failed its digest check with no way out but
+        // Remove. A zero expected size means "unknown", where presence is all
+        // that can be checked.
+        let (_, expected) = file.installed();
+        let present = path.is_file() && (expected == 0 || actual == expected);
         if !present {
             all_present = false;
             missing_bytes += file.bytes;
@@ -109,7 +132,7 @@ pub fn status(models_root: &Path, pack: &ModelPack) -> PackStatus {
             role: file.role,
             name: file.name.to_string(),
             present,
-            expected_bytes: file.bytes,
+            expected_bytes: expected,
             actual_bytes: actual,
         });
     }
@@ -143,11 +166,18 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, String> {
     Ok(manifest)
 }
 
-/// Full verification: every file in the manifest exists and hashes to the
-/// recorded digest, and every catalog file is in the manifest.
+/// Full verification: every catalog file exists in the pack folder and hashes to
+/// the digest pinned in the catalog.
 ///
-/// This reads the whole pack (up to ~300 MB), so it runs after an install and
-/// on an explicit "verify" action, not on every screen open.
+/// The digest comes from the catalog, not from the folder's own manifest. The
+/// manifest is written from whatever bytes happen to be in the staging folder, so
+/// checking a folder against its own manifest proves only that the folder has not
+/// changed since it was written — a pack assembled by hand, or by any future code
+/// path that skips the per-file check, would pass. The catalog is the published
+/// artifact and is the only thing here that can be wrong in a way that matters.
+///
+/// This reads the whole pack (up to ~300 MB), so it runs after an install and on
+/// an explicit "verify" action, not on every screen open.
 pub fn verify(models_root: &Path, pack: &ModelPack) -> Result<Manifest, Vec<String>> {
     let dir = dir_for(models_root, pack);
     let manifest = match read_manifest(&dir) {
@@ -158,13 +188,11 @@ pub fn verify(models_root: &Path, pack: &ModelPack) -> Result<Manifest, Vec<Stri
 
     let mut problems = Vec::new();
     for file in pack.files {
-        match manifest.files.get(file.name) {
-            Some(expected) => match hash_file(&dir.join(file.name)) {
-                Ok(actual) if actual == *expected => {}
-                Ok(actual) => problems.push(format!("{0}: digest {1}", file.name, &actual[..12])),
-                Err(err) => problems.push(format!("{}: {err}", file.name)),
-            },
-            None => problems.push(format!("{}: not in manifest", file.name)),
+        let (expected, _) = file.installed();
+        match hash_file(&dir.join(file.name)) {
+            Ok(actual) if actual == expected => {}
+            Ok(actual) => problems.push(format!("{0}: digest {1}", file.name, &actual[..12])),
+            Err(err) => problems.push(format!("{}: {err}", file.name)),
         }
     }
     for name in manifest.files.keys() {
@@ -257,13 +285,50 @@ pub fn promote(models_root: &Path, pack: &ModelPack) -> Result<PathBuf, String> 
         }
         Err(err) => {
             // Put the old pack back before reporting, so the user keeps a
-            // working model.
-            if retired.exists() {
-                let _ = std::fs::rename(&retired, &target);
+            // working model. A failure here is reported rather than dropped:
+            // silently losing the previous pack is worse than a second error
+            // message, and `recover` can still restore it on the next launch
+            // because the retired folder is left in place.
+            if retired.exists()
+                && let Err(restore) = std::fs::rename(&retired, &target)
+            {
+                return Err(format!(
+                    "could not move the pack into place: {err}; restoring the previous pack also failed: {restore}"
+                ));
             }
             Err(format!("could not move the pack into place: {err}"))
         }
     }
+}
+
+/// Checks a staging folder against the catalog before it replaces a working
+/// pack. The folder's own manifest is not consulted for digests: it was written
+/// from these same bytes, so it cannot tell a good install from a bad one.
+/// Repairs a pack folder left behind by an interrupted [`promote`].
+///
+/// Promotion renames the working pack to `.retired-<id>` and then the staging
+/// folder into place. A crash or power loss between the two renames leaves the
+/// pack folder absent, the old bytes orphaned under `.retired-<id>`, and no code
+/// path that looks there: the pack reported NotInstalled, the active marker
+/// pointed at nothing, and the only recovery was to download 300 MB again.
+///
+/// Returns `true` when something was repaired. Safe to call at any time: it only
+/// acts when the pack folder itself is missing, or when both exist and the
+/// leftover is the stale copy.
+pub fn recover(models_root: &Path, pack: &ModelPack) -> bool {
+    let target = dir_for(models_root, pack);
+    let Some(parent) = target.parent() else {
+        return false;
+    };
+    let retired = parent.join(format!(".retired-{}", pack.id));
+    if !retired.is_dir() {
+        return false;
+    }
+    if target.is_dir() {
+        // Both are present, so the swap finished and only the cleanup was lost.
+        return std::fs::remove_dir_all(&retired).is_ok();
+    }
+    std::fs::rename(&retired, &target).is_ok()
 }
 
 fn verify_manifest_in(dir: &Path, pack: &ModelPack) -> Result<(), String> {
@@ -272,12 +337,9 @@ fn verify_manifest_in(dir: &Path, pack: &ModelPack) -> Result<(), String> {
         return Err("manifest belongs to another pack".to_string());
     }
     for file in pack.files {
-        let expected = manifest
-            .files
-            .get(file.name)
-            .ok_or_else(|| format!("{} is not in the manifest", file.name))?;
+        let (expected, _) = file.installed();
         let actual = hash_file(&dir.join(file.name))?;
-        if actual != *expected {
+        if actual != expected {
             return Err(format!("{} failed its digest check", file.name));
         }
     }
@@ -342,9 +404,28 @@ pub fn set_active(models_root: &Path, pack: &ModelPack) -> Result<(), String> {
     std::fs::create_dir_all(models_root).map_err(|err| err.to_string())?;
     // Write beside the target and rename: a crash mid-write leaves either the
     // old marker or the new one, never half a JSON document.
-    let temporary = models_root.join(format!("{ACTIVE}.tmp"));
+    //
+    // The temp name has to be unique per call. Activation is an async command,
+    // so two clicks run on two threads; a fixed `.tmp` name let both truncate
+    // and write the same file, and interleaved writes of ids of different
+    // lengths produced invalid JSON. The marker then read back as absent and the
+    // app silently reverted to the bundled pack, as if the click had been
+    // ignored.
+    let temporary = unique_temp_path(models_root, ACTIVE);
     std::fs::write(&temporary, encoded).map_err(|err| err.to_string())?;
-    std::fs::rename(&temporary, models_root.join(ACTIVE)).map_err(|err| err.to_string())
+    let result = std::fs::rename(&temporary, models_root.join(ACTIVE));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(|err| err.to_string())
+}
+
+/// A temp path beside `target` that no concurrent caller can collide with.
+fn unique_temp_path(dir: &Path, target: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nonce = COUNTER.fetch_add(1, Ordering::Relaxed);
+    dir.join(format!("{target}.{}.{nonce}.tmp", std::process::id()))
 }
 
 /// Returns to the bundled pack.
@@ -404,54 +485,58 @@ mod tests {
         }
     }
 
-    static FILES: &[PackFile] = &[
-        PackFile {
-            role: FileRole::Det,
-            name: "det.onnx",
-            url: "https://example.com/det",
-            sha256: "0",
-            bytes: 0,
-            format: FileFormat::Raw,
-        },
-        PackFile {
-            role: FileRole::RecEn,
-            name: "rec_en.onnx",
-            url: "https://example.com/en",
-            sha256: "0",
-            bytes: 0,
-            format: FileFormat::Raw,
-        },
-        PackFile {
-            role: FileRole::RecAr,
-            name: "rec_ar.onnx",
-            url: "https://example.com/ar",
-            sha256: "0",
-            bytes: 0,
-            format: FileFormat::Raw,
-        },
-        PackFile {
-            role: FileRole::DictEn,
-            name: "rec_en_dict.txt",
-            url: "https://example.com/endict",
-            sha256: "0",
-            bytes: 0,
-            format: FileFormat::Raw,
-        },
-        PackFile {
-            role: FileRole::DictAr,
-            name: "rec_ar_dict.txt",
-            url: "https://example.com/ardict",
-            sha256: "0",
-            bytes: 0,
-            format: FileFormat::Raw,
-        },
-    ];
+    /// The bytes `staged()` writes for one file. One definition, so the pinned
+    /// digest and the written file cannot drift apart.
+    fn staged_bytes(name: &str) -> Vec<u8> {
+        format!("bytes of {name}").into_bytes()
+    }
+
+    fn digest(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// A pack whose catalog digests are the real digests of the fixture's files.
+    ///
+    /// The catalog is the trust root for verification, so placeholder digests
+    /// would only prove that a comparison happens, not that it compares the right
+    /// thing. Building the entries at runtime keeps the fixture honest.
+    fn test_files() -> &'static [PackFile] {
+        use std::sync::OnceLock;
+        static FILES: OnceLock<Vec<PackFile>> = OnceLock::new();
+        FILES.get_or_init(|| {
+            const NAMES: [(&str, FileRole); 5] = [
+                ("det.onnx", FileRole::Det),
+                ("rec_en.onnx", FileRole::RecEn),
+                ("rec_ar.onnx", FileRole::RecAr),
+                ("rec_en_dict.txt", FileRole::DictEn),
+                ("rec_ar_dict.txt", FileRole::DictAr),
+            ];
+            NAMES
+                .into_iter()
+                .map(|(name, role)| {
+                    let bytes = staged_bytes(name);
+                    PackFile {
+                        role,
+                        name,
+                        url: "https://example.com/file",
+                        sha256: Box::leak(digest(&bytes).into_boxed_str()),
+                        bytes: bytes.len() as u64,
+                        format: FileFormat::Raw,
+                        installed_sha256: None,
+                        installed_bytes: 0,
+                    }
+                })
+                .collect()
+        })
+    }
 
     fn staged(root: &Path, pack: &ModelPack) -> PathBuf {
         let dir = staging_dir(root, pack);
         std::fs::create_dir_all(&dir).expect("staging");
         for file in pack.files {
-            std::fs::write(dir.join(file.name), format!("bytes of {}", file.name)).expect("write");
+            std::fs::write(dir.join(file.name), staged_bytes(file.name)).expect("write");
         }
         dir
     }
@@ -459,7 +544,7 @@ mod tests {
     #[test]
     fn an_empty_folder_is_not_installed() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let status = status(temp.path(), &pack);
         assert_eq!(status.state, InstallState::NotInstalled);
         assert!(!status.is_installed());
@@ -468,21 +553,23 @@ mod tests {
     #[test]
     fn files_without_a_manifest_are_only_partial() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let dir = staging_dir(temp.path(), &pack);
         std::fs::create_dir_all(&dir).expect("staging");
         std::fs::write(dir.join("det.onnx"), b"x").expect("write");
         // Staging is not the install folder; a stray install folder is.
         let target = dir_for(temp.path(), &pack);
         std::fs::create_dir_all(&target).expect("target");
-        std::fs::write(target.join("det.onnx"), b"x").expect("write");
+        // The right bytes, so the file is genuinely present; only the manifest
+        // is missing, which is what "partial" means.
+        std::fs::write(target.join("det.onnx"), staged_bytes("det.onnx")).expect("write");
         assert_eq!(status(temp.path(), &pack).state, InstallState::Partial);
     }
 
     #[test]
     fn promote_installs_and_verifies() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let dir = staged(temp.path(), &pack);
         write_manifest(&dir, &pack).expect("manifest");
         let installed = promote(temp.path(), &pack).expect("promote");
@@ -494,7 +581,7 @@ mod tests {
     #[test]
     fn a_corrupt_staging_folder_is_never_promoted() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let dir = staged(temp.path(), &pack);
         write_manifest(&dir, &pack).expect("manifest");
         std::fs::write(dir.join("rec_en.onnx"), b"tampered").expect("tamper");
@@ -505,7 +592,7 @@ mod tests {
     #[test]
     fn an_installed_pack_that_changed_on_disk_fails_verification() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let dir = staged(temp.path(), &pack);
         write_manifest(&dir, &pack).expect("manifest");
         promote(temp.path(), &pack).expect("install");
@@ -523,7 +610,7 @@ mod tests {
     #[test]
     fn promote_keeps_the_old_pack_when_the_new_one_is_bad() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let dir = staged(temp.path(), &pack);
         write_manifest(&dir, &pack).expect("manifest");
         promote(temp.path(), &pack).expect("first install");
@@ -549,7 +636,7 @@ mod tests {
     #[test]
     fn remove_deletes_an_installed_pack_and_refuses_the_bundled_one() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let dir = staged(temp.path(), &pack);
         write_manifest(&dir, &pack).expect("manifest");
         promote(temp.path(), &pack).expect("install");
@@ -563,7 +650,7 @@ mod tests {
     #[test]
     fn activation_requires_a_verified_install() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         assert!(
             set_active(temp.path(), &pack).is_err(),
             "an uninstalled pack must not activate"
@@ -582,7 +669,7 @@ mod tests {
     #[test]
     fn a_tampered_pack_cannot_be_activated() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let dir = staged(temp.path(), &pack);
         write_manifest(&dir, &pack).expect("manifest");
         promote(temp.path(), &pack).expect("install");
@@ -595,7 +682,7 @@ mod tests {
     #[test]
     fn removing_the_active_pack_returns_to_the_bundled_one() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let pack = test_pack(FILES);
+        let pack = test_pack(test_files());
         let dir = staged(temp.path(), &pack);
         write_manifest(&dir, &pack).expect("manifest");
         promote(temp.path(), &pack).expect("install");
@@ -611,6 +698,188 @@ mod tests {
         assert_eq!(active_pack(temp.path()).as_deref(), Some("deleted-pack"));
         // The shell resolves the id; an unknown one falls back to bundled.
         assert!(crate::catalog::pack("deleted-pack").is_none());
+    }
+
+    /// A file truncated by an interrupted copy, a restore or a damaged disk used
+    /// to satisfy `actual > 0`, so the pack reported Installed, the downloader
+    /// refused to repair it ("already installed"), and activation then failed its
+    /// digest check with no way out but Remove.
+    #[test]
+    fn a_truncated_file_is_not_installed() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack = test_pack(test_files());
+        let dir = staged(temp.path(), &pack);
+        write_manifest(&dir, &pack).expect("manifest");
+        promote(temp.path(), &pack).expect("install");
+
+        let installed = dir_for(temp.path(), &pack).join("rec_en.onnx");
+        let full = std::fs::metadata(&installed).expect("metadata").len();
+        assert!(full > 1);
+        std::fs::write(&installed, &staged_bytes("rec_en.onnx")[..1]).expect("truncate");
+
+        let status = status(temp.path(), &pack);
+        assert_eq!(
+            status.state,
+            InstallState::Partial,
+            "a one-byte model must not report Installed"
+        );
+        let entry = status
+            .files
+            .iter()
+            .find(|file| file.name == "rec_en.onnx")
+            .expect("file");
+        assert!(!entry.present);
+        assert_eq!(entry.actual_bytes, 1);
+        assert_eq!(entry.expected_bytes, full);
+    }
+
+    /// A derived file lands in the pack folder as bytes that are not the
+    /// download: the v5 Arabic dictionary is extracted from the model's
+    /// `inference.yml`. The catalog pins the derived digest, so the one file
+    /// nothing upstream publishes a digest for is still verified.
+    #[test]
+    fn a_derived_file_is_verified_against_its_own_digest() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let derived = b"a\nb\nc\n";
+        let files: &'static [PackFile] = Box::leak(
+            vec![PackFile {
+                role: FileRole::DictAr,
+                name: "rec_ar_dict.txt",
+                url: "https://example.com/inference.yml",
+                // The published YAML, which is not what lands in the folder.
+                sha256: "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+                bytes: 6_165,
+                format: FileFormat::CharacterDictYaml,
+                installed_sha256: Some(Box::leak(digest(derived).into_boxed_str())),
+                installed_bytes: derived.len() as u64,
+            }]
+            .into_boxed_slice(),
+        );
+        let pack = test_pack(files);
+        let dir = staging_dir(temp.path(), &pack);
+        std::fs::create_dir_all(&dir).expect("staging");
+        std::fs::write(dir.join("rec_ar_dict.txt"), derived).expect("write");
+        write_manifest(&dir, &pack).expect("manifest");
+        promote(temp.path(), &pack).expect("the derived file matches its pinned digest");
+        verify(temp.path(), &pack).expect("verify");
+
+        // The status screen must report the size that is actually there, not the
+        // size of the YAML that was downloaded.
+        let status = status(temp.path(), &pack);
+        assert_eq!(status.files[0].expected_bytes, derived.len() as u64);
+
+        // One changed byte and the pack stops verifying.
+        std::fs::write(
+            dir_for(temp.path(), &pack).join("rec_ar_dict.txt"),
+            b"a\nb\nz\n",
+        )
+        .expect("tamper");
+        assert!(verify(temp.path(), &pack).is_err());
+    }
+
+    /// Promotion renames the working pack aside and then the staging folder into
+    /// place. A crash between the two left the pack folder absent and the old
+    /// bytes orphaned, with no code path that looked for them: the only recovery
+    /// was a fresh 300 MB download.
+    #[test]
+    fn an_interrupted_promotion_is_repaired_on_the_next_look() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack = test_pack(test_files());
+        let dir = staged(temp.path(), &pack);
+        write_manifest(&dir, &pack).expect("manifest");
+        promote(temp.path(), &pack).expect("install");
+        let installed = dir_for(temp.path(), &pack);
+        let before = std::fs::read(installed.join("det.onnx")).expect("read");
+
+        // The state a crash between the two renames leaves behind.
+        let parent = installed.parent().expect("parent").to_path_buf();
+        let retired = parent.join(format!(".retired-{}", pack.id));
+        std::fs::rename(&installed, &retired).expect("simulate crash");
+        assert_eq!(status(temp.path(), &pack).state, InstallState::NotInstalled);
+
+        assert!(recover(temp.path(), &pack), "the old pack must come back");
+        assert_eq!(
+            std::fs::read(installed.join("det.onnx")).expect("read"),
+            before
+        );
+        assert_eq!(status(temp.path(), &pack).state, InstallState::Installed);
+        assert!(!recover(temp.path(), &pack), "nothing left to repair");
+    }
+
+    /// A finished swap whose cleanup was lost leaves both folders. The retired
+    /// one is the stale copy and must go; the installed one must not be touched.
+    #[test]
+    fn a_finished_swap_cleans_up_its_leftover() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack = test_pack(test_files());
+        let dir = staged(temp.path(), &pack);
+        write_manifest(&dir, &pack).expect("manifest");
+        promote(temp.path(), &pack).expect("install");
+        let installed = dir_for(temp.path(), &pack);
+        let before = std::fs::read(installed.join("det.onnx")).expect("read");
+        let retired = installed
+            .parent()
+            .expect("parent")
+            .join(format!(".retired-{}", pack.id));
+        std::fs::create_dir_all(&retired).expect("retired");
+        std::fs::write(retired.join("det.onnx"), b"stale").expect("write");
+
+        assert!(recover(temp.path(), &pack));
+        assert!(!retired.exists());
+        assert_eq!(
+            std::fs::read(installed.join("det.onnx")).expect("read"),
+            before
+        );
+    }
+
+    /// Activation is an async command, so two clicks run on two threads. A fixed
+    /// `.tmp` name let both truncate and write the same file, and interleaved
+    /// writes of ids of different lengths left invalid JSON — which reads back as
+    /// "no active pack", so the click looked ignored.
+    #[test]
+    fn concurrent_activations_do_not_corrupt_the_marker() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack = test_pack(test_files());
+        let dir = staged(temp.path(), &pack);
+        write_manifest(&dir, &pack).expect("manifest");
+        promote(temp.path(), &pack).expect("install");
+
+        let root = temp.path().to_path_buf();
+        let pack: &'static ModelPack = Box::leak(Box::new(pack));
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    let _ = set_active(&root, pack);
+                });
+            }
+        });
+        // Whatever won, the marker must be readable and name this pack.
+        assert_eq!(active_pack(temp.path()).as_deref(), Some(pack.id));
+        // And no temp files are left behind.
+        let leftovers = std::fs::read_dir(temp.path())
+            .expect("dir")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0, "a temp marker survived");
+    }
+
+    /// The peak is the sum of the files plus one more copy of the largest,
+    /// because `prepare_file` writes the prepared file beside the download.
+    #[test]
+    fn the_disk_requirement_covers_the_prepare_copy() {
+        let pack = crate::catalog::pack("ppocrv5-server").expect("pack");
+        let largest = pack.files.iter().map(|file| file.bytes).max().unwrap_or(0);
+        let minimum = (pack.download_bytes() + largest).div_ceil(1024 * 1024);
+        assert!(
+            disk_requirement_mb(pack) >= minimum,
+            "{} MB does not cover {minimum} MB of files plus headroom",
+            disk_requirement_mb(pack)
+        );
+        assert!(
+            disk_requirement_mb(pack) < minimum + 256,
+            "headroom is bounded"
+        );
     }
 
     #[test]
@@ -630,6 +899,8 @@ mod tests {
             sha256: "0",
             bytes: 0,
             format: FileFormat::CharacterDictYaml,
+            installed_sha256: None,
+            installed_bytes: 0,
         };
         let prepared = prepare_file(&file, &path).expect("prepare");
         let text = String::from_utf8(prepared).expect("utf8");

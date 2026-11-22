@@ -35,6 +35,7 @@ export default function PagePreview({
   showBoxes,
   onSelect,
   rtl,
+  emptyMessage,
 }: {
   dataUrl: string | null;
   page: { width: number; height: number } | null;
@@ -43,6 +44,8 @@ export default function PagePreview({
   showBoxes: boolean;
   onSelect: (index: number) => void;
   rtl: boolean;
+  /** Shown when there is no page image; a text document has none by nature. */
+  emptyMessage?: string;
 }) {
   if (!dataUrl || !page) {
     return (
@@ -51,7 +54,8 @@ export default function PagePreview({
           <Icon name="image" size={18} />
         </span>
         <p className="text-xs text-zinc-500">
-          {rtl ? "شغّل التعرف الضوئي لعرض الصفحة" : "Run OCR to render the page"}
+          {emptyMessage ??
+            (rtl ? "شغّل التعرف الضوئي لعرض الصفحة" : "Run OCR to render the page")}
         </p>
       </div>
     );
@@ -71,7 +75,7 @@ export default function PagePreview({
         <img
           src={dataUrl}
           alt={rtl ? "معاينة الصفحة" : "Page preview"}
-          className="block h-full w-auto max-w-full select-none rounded-sm bg-white object-contain"
+          className="block h-full w-auto max-w-full select-none rounded-sm bg-[#fff] object-contain"
           draggable={false}
         />
         {showBoxes &&

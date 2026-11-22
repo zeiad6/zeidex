@@ -19,7 +19,6 @@ use crate::state::AppState;
 pub fn run() -> anyhow::Result<()> {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             // A fresh install launched from the desktop entry has no window and
@@ -44,6 +43,41 @@ pub fn run() -> anyhow::Result<()> {
             // state.
             let index_service = IndexService::start(app.handle().clone());
             app.manage(index_service.clone());
+
+            // Text indexed for a file that was later edited or deleted would
+            // surface a hit that opens the wrong content. One pass at startup is
+            // enough: this index is written by OCR runs the user starts, not by
+            // the live file watcher.
+            //
+            // It holds the store lock for the stat pass, which is why it runs
+            // here and not in a command: the window may be up, but the pass is
+            // bounded by `MAX_DOCUMENT_ROWS` stats and finishes in milliseconds
+            // on local storage.
+            let pruner = app.handle().clone();
+            let prune_started = std::thread::Builder::new()
+                .name("document-index-prune".to_string())
+                .spawn(move || {
+                    let Some(state) = pruner.try_state::<AppState>() else {
+                        return;
+                    };
+                    let mut store = state
+                        .store
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    match store.prune_stale_document_text() {
+                        Ok(pruned) if pruned.total() > 0 => eprintln!(
+                            "zeidex: dropped {} stale document index entries ({} missing, {} changed)",
+                            pruned.total(),
+                            pruned.missing,
+                            pruned.changed
+                        ),
+                        Ok(_) => {}
+                        Err(err) => eprintln!("zeidex: document index prune failed: {err}"),
+                    }
+                });
+            if let Err(err) = prune_started {
+                eprintln!("zeidex: document index prune did not start: {err}");
+            }
 
             // Clipboard capture must not depend on the webview being visible;
             // see `run_monitor`. Failing to start it costs history, not the
@@ -91,6 +125,18 @@ pub fn run() -> anyhow::Result<()> {
             index_service.start_initial_index();
             Ok(())
         })
+        // A file dropped on the window is chosen by the user, with the OS as the
+        // picker. Minting it here is what lets the Studio open it: the webview
+        // only ever sees the path it was already told about.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event
+                && let Some(state) = window.try_state::<AppState>()
+            {
+                for path in paths {
+                    state.paths.mint(path);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::calc::calc_eval,
             commands::batch::batch_parse,
@@ -99,7 +145,16 @@ pub fn run() -> anyhow::Result<()> {
             commands::batch::batch_export,
             commands::search::search,
             commands::search::bootstrap_index,
+            commands::search::index_pause,
+            commands::search::index_resume,
+            commands::search::index_cancel,
+            commands::search::index_control_state,
             commands::search::candidate_count,
+            commands::documents::document_index_status,
+            commands::documents::document_set_indexing,
+            commands::documents::document_text_store,
+            commands::documents::document_text_remove,
+            commands::documents::document_text_clear,
             commands::search::record_usage,
             commands::clipboard::clipboard_list,
             commands::clipboard::clipboard_record_text,
@@ -110,14 +165,14 @@ pub fn run() -> anyhow::Result<()> {
             commands::clipboard::clipboard_set_pinned,
             commands::clipboard::clipboard_clear,
             commands::ocr::ocr_models_status,
+            commands::ocr::ocr_pick_file,
+            commands::ocr::document_extract_text,
             commands::ocr::ocr_page_preview,
             commands::ocr::ocr_process_image,
             commands::ocr::ocr_process_pdf,
             commands::ocr::ocr_process_pdf_range,
             commands::ocr::ocr_cancel,
-            commands::ocr::export_docx,
             commands::ocr::export_docx_pages,
-            commands::ocr::export_xlsx,
             commands::ocr::export_xlsx_pages,
             commands::system::open_target,
             commands::system::reveal_target,
@@ -136,6 +191,7 @@ pub fn run() -> anyhow::Result<()> {
             commands::models::models_benchmark,
             commands::settings::settings_snapshot,
             commands::settings::settings_update,
+            commands::settings::settings_pick_folder,
             commands::translate::translate_text,
         ])
         .build(tauri::generate_context!())?;

@@ -24,6 +24,18 @@ fn corpus(count: usize) -> Vec<BatchFile> {
         .collect()
 }
 
+/// Peak resident set of this process, in MiB.
+///
+/// Reported because a batch search holds the whole index-derived corpus in
+/// memory at once, and "fast" is not an achievement if it costs a gigabyte.
+/// Linux keeps the high-water mark; elsewhere the line is simply omitted.
+fn peak_rss_mb() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;
+    let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kb / 1024)
+}
+
 fn run(label: &str, files: &[BatchFile], entries: &[String], threshold: u8) {
     let started = Instant::now();
     let report = search(files, entries, threshold);
@@ -72,4 +84,12 @@ fn a_large_batch_stays_interactive() {
     // the slowest honest configuration.
     let broad: Vec<String> = (0..200).map(|i| format!("meeting notes {i}")).collect();
     run("broad", &files, &broad, 50);
+
+    match peak_rss_mb() {
+        Some(mb) => eprintln!(
+            "peak resident set with a {} file corpus: {mb} MiB",
+            files.len()
+        ),
+        None => eprintln!("peak resident set: not measurable on this platform"),
+    }
 }

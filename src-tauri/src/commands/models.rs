@@ -33,7 +33,6 @@ const PROGRESS_EVENT: &str = "models-progress";
 const CANCELLED: &str = "download cancelled";
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ModelFileView {
     pub role: zeidex_models::FileRole,
     pub name: String,
@@ -43,7 +42,6 @@ pub struct ModelFileView {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct PackView {
     pub id: &'static str,
     pub tier: Tier,
@@ -70,7 +68,6 @@ pub struct PackView {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AdvisorView {
     pub profile: DeviceProfile,
     pub class: DeviceClass,
@@ -86,7 +83,6 @@ pub struct AdvisorView {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct VerifyView {
     pub pack_id: &'static str,
     pub ok: bool,
@@ -96,7 +92,6 @@ pub struct VerifyView {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SampleView {
     pub name: &'static str,
     pub milliseconds: u64,
@@ -109,7 +104,6 @@ pub struct SampleView {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BenchmarkView {
     pub pack_id: &'static str,
     pub pack_name: &'static str,
@@ -121,7 +115,6 @@ pub struct BenchmarkView {
 }
 
 #[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct DownloadProgress {
     pub pack_id: String,
     /// downloading | verifying | installing | done | cancelled | error
@@ -168,6 +161,10 @@ pub fn models_advisor(state: State<'_, AppState>) -> AdvisorView {
     }
 }
 
+/// Slowest average a download may sustain after its first minute, in bytes per
+/// second. Below this the connection is not slow, it is stalled.
+const MIN_DOWNLOAD_BYTES_PER_SECOND: f64 = 1_024.0;
+
 /// Downloads, verifies and installs one pack. The pack is not activated here:
 /// the user chooses when the working model changes.
 #[tauri::command]
@@ -180,7 +177,14 @@ pub async fn models_download(
     if pack.bundled {
         return Err(format!("{} is bundled and needs no download", pack.name));
     }
-    if status(&state.models_root, pack).is_installed() {
+    // "Installed" is not the same as "working". A pack whose files no longer
+    // match the catalog — truncated by an interrupted copy, damaged by a restore,
+    // or left over from an older layout — reports Installed, so refusing here
+    // left the user with no repair path at all: activation failed its digest
+    // check and the only way forward was Remove. A pack that verifies is still
+    // refused, because re-downloading 300 MB for nothing is worse.
+    let current = status(&state.models_root, pack);
+    if current.is_installed() && models::verify(&state.models_root, pack).is_ok() {
         return Err(format!("{} is already installed", pack.name));
     }
 
@@ -262,6 +266,18 @@ pub fn models_activate(
 #[tauri::command(async)]
 pub fn models_remove(state: State<'_, AppState>, pack_id: String) -> Result<Vec<PackView>, String> {
     let pack = models::pack(&pack_id).ok_or_else(|| format!("unknown model pack: {pack_id}"))?;
+    // `remove` deletes the staging folder that an in-flight download is writing
+    // into. On Unix the writer keeps writing to unlinked inodes and then fails
+    // at the hash with ENOENT — a confusing error, and the single download slot
+    // stays busy until it happens. Refuse instead, and say why.
+    if let Some(active) = state.downloading_pack()
+        && active == pack.id
+    {
+        return Err(format!(
+            "{} is still downloading; cancel the download before removing it",
+            pack.name
+        ));
+    }
     models::remove(&state.models_root, pack)?;
     state.reset_ocr_engine();
     Ok(catalog(&state))
@@ -340,6 +356,15 @@ pub async fn models_benchmark(
 }
 
 fn catalog(state: &AppState) -> Vec<PackView> {
+    // A promotion that was interrupted between its two renames leaves the pack
+    // folder absent and the previous bytes orphaned under `.retired-<id>`. The
+    // list is the first thing the models screen asks for, so repairing here means
+    // the user sees a working pack instead of a 300 MB download button.
+    for pack in models::PACKS {
+        if !pack.bundled {
+            models::recover(&state.models_root, pack);
+        }
+    }
     models::PACKS
         .iter()
         .map(|pack| pack_view(state, pack))
@@ -437,7 +462,9 @@ async fn install_pack(
 
     let total = pack.download_bytes();
     let free_mb = hardware::free_space_mb(root);
-    let needed_mb = total / (1024 * 1024) + 128;
+    // The same requirement the advisor uses, so a device is never told a pack
+    // does not fit and then allowed to install it.
+    let needed_mb = models::disk_requirement_mb(pack);
     if free_mb != 0 && free_mb < needed_mb {
         return Err(format!(
             "{} needs about {needed_mb} MB of free disk; only {free_mb} MB is available on the models volume",
@@ -580,6 +607,19 @@ async fn fetch_file(
             file.name
         ));
     }
+    // A body longer than the catalog says must not be written. `reqwest` follows
+    // up to ten redirects and does not constrain the final host, so a hostile or
+    // compromised mirror could stream an unbounded body into the staging folder
+    // until the volume filled. The digest check would still reject the content;
+    // the point here is to refuse before the disk is gone.
+    if let Some(length) = response.content_length()
+        && length > file.bytes.saturating_sub(offset)
+    {
+        return Err(format!(
+            "{}: the server offered {length} bytes but the catalog expects {}; refusing the download",
+            file.name, file.bytes
+        ));
+    }
     // A server that ignores Range answers 200 with the whole file. Start over
     // rather than appending a second copy to the partial one.
     let resuming = offset > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
@@ -608,9 +648,38 @@ async fn fetch_file(
             sink.flush().ok();
             return Err(CANCELLED.to_string());
         }
+        // The declared length can be absent or wrong, so the running total is
+        // checked too: the write must never take the staging folder past the
+        // size the catalog promises.
+        if received + chunk.len() as u64 > file.bytes {
+            sink.flush().ok();
+            drop(sink);
+            let _ = std::fs::remove_file(part);
+            return Err(format!(
+                "{}: the server sent more than the {} bytes the catalog expects; the download was discarded",
+                file.name, file.bytes
+            ));
+        }
         sink.write_all(&chunk)
             .map_err(|err| format!("{}: {err}", part.display()))?;
         received += chunk.len() as u64;
+        // A server that dribbles a byte at a time never trips the per-read
+        // timeout, and the single download slot would stay busy for as long as it
+        // cared to. A minimum average rate after a grace period closes that
+        // without hurting a genuinely slow link: even a 56k modem clears 5 KB/s.
+        let elapsed = started.elapsed();
+        if elapsed > Duration::from_secs(60) {
+            let average = (received - offset) as f64 / elapsed.as_secs_f64().max(1.0);
+            if average < MIN_DOWNLOAD_BYTES_PER_SECOND {
+                sink.flush().ok();
+                drop(sink);
+                let _ = std::fs::remove_file(part);
+                return Err(format!(
+                    "{}: the connection is delivering about {average:.0} bytes per second; the download was stopped",
+                    file.name
+                ));
+            }
+        }
         if last_emit.elapsed() >= Duration::from_millis(120) {
             let elapsed = started.elapsed().as_secs_f64().max(0.001);
             let speed_bps = ((received - offset) as f64 / elapsed) as u64;
@@ -813,5 +882,210 @@ mod tests {
     fn the_benchmark_samples_are_png_files() {
         assert!(SAMPLE_EN_PNG.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert!(SAMPLE_AR_PNG.starts_with(b"\x89PNG\r\n\x1a\n"));
+    }
+}
+
+/// The screen reads these names. Rust structs and the TypeScript interfaces are
+/// two hand-written halves of one contract, and a `rename_all` on one side only
+/// is exactly how the Models screen shipped blank: `recommended_pack` arrived as
+/// `recommendedPack`, the card dereferenced `undefined`, and React unmounted the
+/// tree. These tests pin the wire names so the two halves cannot drift again.
+#[cfg(test)]
+mod contract {
+    use super::*;
+
+    fn pack() -> PackView {
+        PackView {
+            id: "ppocrv4-mobile",
+            tier: Tier::Compact,
+            tier_label: "Lightweight",
+            tier_label_ar: "خفيف",
+            name: "Fast",
+            name_ar: "سريع",
+            summary: "summary",
+            summary_ar: "ملخص",
+            ram_mb: 320,
+            download_bytes: 0,
+            installed_bytes: 0,
+            bundled: true,
+            arabic: true,
+            english: true,
+            rec_ar_visual: false,
+            source: "PaddleOCR",
+            license: "Apache-2.0",
+            state: InstallState::Installed,
+            active: true,
+            downloading: false,
+            dir: "/models".to_string(),
+            files: vec![ModelFileView {
+                role: zeidex_models::FileRole::Det,
+                name: "det.onnx".to_string(),
+                present: true,
+                expected_bytes: 1,
+                actual_bytes: 1,
+            }],
+        }
+    }
+
+    fn keys(value: &serde_json::Value) -> Vec<&str> {
+        let mut names: Vec<&str> = value
+            .as_object()
+            .expect("a struct serialises to an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        names.sort_unstable();
+        names
+    }
+
+    #[test]
+    fn pack_payload_uses_the_names_the_ui_reads() {
+        let json = serde_json::to_value(pack()).unwrap();
+        assert_eq!(
+            keys(&json),
+            vec![
+                "active",
+                "arabic",
+                "bundled",
+                "dir",
+                "download_bytes",
+                "downloading",
+                "english",
+                "files",
+                "id",
+                "installed_bytes",
+                "license",
+                "name",
+                "name_ar",
+                "ram_mb",
+                "rec_ar_visual",
+                "source",
+                "state",
+                "summary",
+                "summary_ar",
+                "tier",
+                "tier_label",
+                "tier_label_ar",
+            ]
+        );
+        assert_eq!(
+            keys(&json["files"][0]),
+            vec!["actual_bytes", "expected_bytes", "name", "present", "role"]
+        );
+    }
+
+    #[test]
+    fn advisor_payload_uses_the_names_the_ui_reads() {
+        let advisor = AdvisorView {
+            profile: DeviceProfile {
+                cpu_model: "Test CPU".to_string(),
+                physical_cores: 8,
+                logical_cores: 8,
+                total_ram_mb: 16_384,
+                available_ram_mb: 8_192,
+                free_disk_mb: 100_000,
+                os: "linux".to_string(),
+                arch: "aarch64".to_string(),
+                gpu: None,
+                gpu_memory_mb: None,
+                gpu_acceleration: false,
+            },
+            class: DeviceClass::Standard,
+            class_label: "Standard",
+            class_label_ar: "قياسي",
+            score: 3,
+            max_score: 7,
+            criteria: vec![],
+            recommendation: Recommendation {
+                pack_id: "ppocrv4-mobile",
+                device_class: DeviceClass::Standard,
+                score: 3,
+                reason: "reason".to_string(),
+                reason_ar: "سبب".to_string(),
+                downgraded: false,
+                insufficient_memory: false,
+                ocr_concurrency: 2,
+                batch_chunk: 64,
+                index_threads: 2,
+            },
+            recommended_pack: pack(),
+            ram_used_percent: 40,
+        };
+        let json = serde_json::to_value(advisor).unwrap();
+        assert_eq!(
+            keys(&json),
+            vec![
+                "class",
+                "class_label",
+                "class_label_ar",
+                "criteria",
+                "max_score",
+                "profile",
+                "ram_used_percent",
+                "recommendation",
+                "recommended_pack",
+                "score",
+            ]
+        );
+        assert_eq!(
+            keys(&json["recommendation"]),
+            vec![
+                "batch_chunk",
+                "device_class",
+                "downgraded",
+                "index_threads",
+                "insufficient_memory",
+                "ocr_concurrency",
+                "pack_id",
+                "reason",
+                "reason_ar",
+                "score",
+            ]
+        );
+        assert_eq!(
+            keys(&json["profile"]),
+            vec![
+                "arch",
+                "available_ram_mb",
+                "cpu_model",
+                "free_disk_mb",
+                "gpu",
+                "gpu_acceleration",
+                "gpu_memory_mb",
+                "logical_cores",
+                "os",
+                "physical_cores",
+                "total_ram_mb",
+            ]
+        );
+    }
+
+    #[test]
+    fn progress_payload_uses_the_names_the_ui_reads() {
+        let progress = DownloadProgress {
+            pack_id: "ppocrv5-server".to_string(),
+            phase: "downloading",
+            file: None,
+            file_index: 0,
+            file_count: 1,
+            downloaded: 0,
+            total: 1,
+            speed_bps: 0,
+            message: None,
+        };
+        assert_eq!(
+            keys(&serde_json::to_value(progress).unwrap()),
+            vec![
+                "downloaded",
+                "file",
+                "file_count",
+                "file_index",
+                "message",
+                "pack_id",
+                "phase",
+                "speed_bps",
+                "total",
+            ]
+        );
     }
 }

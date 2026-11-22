@@ -39,12 +39,26 @@ impl ParsedList {
 /// names (`report, final.pdf`). A UTF-8 BOM from Notepad is dropped, CRLF is
 /// handled, and a wrapping pair of quotes is removed — that is what a CSV or a
 /// mail client adds around a name, not part of it.
+///
+/// A bare carriage return separates entries too. Old Mac exports and some
+/// mail-client copies use CR alone, and splitting only on LF turned such a file
+/// into a single entry containing every name.
 pub fn parse_list(text: &str) -> ParsedList {
     let mut parsed = ParsedList::default();
     let mut seen = std::collections::HashSet::new();
 
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    for raw in text.split(['\n', '\t']) {
+    // CRLF is one separator, not two. Splitting on both characters separately
+    // would count an empty entry between them for every line of a Windows file,
+    // and the review step would report a file full of blank lines.
+    let normalized;
+    let text = if text.contains("\r\n") {
+        normalized = text.replace("\r\n", "\n");
+        normalized.as_str()
+    } else {
+        text
+    };
+    for raw in text.split(['\n', '\r', '\t']) {
         let entry = clean_entry(raw);
         if entry.is_empty() {
             parsed.dropped_empty += 1;
@@ -192,5 +206,25 @@ mod tests {
     fn arabic_names_survive_untouched() {
         let parsed = parse_list("تقرير الاجتماع.pdf\nكتاب الطالب.docx");
         assert_eq!(parsed.entries, ["تقرير الاجتماع.pdf", "كتاب الطالب.docx"]);
+    }
+
+    /// A classic-Mac export or an old mail-client copy separates names with a
+    /// bare carriage return. Splitting only on LF turned such a file into one
+    /// entry containing every name, which then searched for nothing and exported
+    /// as `_x000D_`-escaped noise.
+    #[test]
+    fn a_cr_only_list_is_split_into_names() {
+        let parsed = parse_list("a.pdf\rb.pdf\rتقرير.pdf");
+        assert_eq!(parsed.entries, ["a.pdf", "b.pdf", "تقرير.pdf"]);
+        assert_eq!(parsed.dropped_empty, 0);
+    }
+
+    /// CRLF must not become a doubled empty entry, and mixed endings must all
+    /// separate.
+    #[test]
+    fn mixed_line_endings_do_not_create_phantom_entries() {
+        let parsed = parse_list("a.pdf\r\nb.pdf\nc.pdf\rd.pdf");
+        assert_eq!(parsed.entries, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"]);
+        assert_eq!(parsed.dropped_empty, 0);
     }
 }

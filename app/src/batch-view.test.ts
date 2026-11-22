@@ -159,8 +159,8 @@ test("the threshold word matches the number", () => {
   assert.equal(thresholdLabel(70, false), "Balanced");
   assert.equal(thresholdLabel(85, false), "High confidence");
   assert.equal(thresholdLabel(95, false), "Very strict");
-  assert.equal(thresholdLabel(100, false), "Exact only");
-  assert.equal(thresholdLabel(100, true), "مطابقة تامة فقط");
+  assert.equal(thresholdLabel(100, false), "Same name, with or without its extension");
+  assert.equal(thresholdLabel(100, true), "الاسم نفسه، بامتداد أو بدونه");
 });
 
 test("status labels are translated, not reused from the backend key", () => {

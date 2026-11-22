@@ -20,6 +20,14 @@ const KIND: Record<string, { icon: IconName; label: string; labelAr: string; ton
     labelAr: "مجلد",
     tone: "text-amber-300 bg-amber-400/10 ring-amber-400/20",
   },
+  // A file found by the text inside it (OCR), not by its name. It opens like
+  // any other file, so the row differs only in the icon and the excerpt.
+  document: {
+    icon: "text",
+    label: "Document",
+    labelAr: "مستند",
+    tone: "text-emerald-300 bg-emerald-400/10 ring-emerald-400/20",
+  },
   setting: {
     icon: "panel",
     label: "Setting",

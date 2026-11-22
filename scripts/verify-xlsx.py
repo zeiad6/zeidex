@@ -103,11 +103,30 @@ def main() -> None:
     if multiple.max_row < 2:
         fail("Multiple Matches is empty, but the fixture has a duplicate name")
 
+    # A truncated candidate list has to say so; otherwise the sheet reads as the
+    # complete answer.
+    headers = [str(cell.value) for cell in multiple[1] if cell.value]
+    if "Notes" not in headers:
+        fail(f"Multiple Matches has no Notes column (headers: {headers})")
+
+    # The summary chart must plot the mutually exclusive outcomes. `Found` is the
+    # sum of the two match rows, so a series covering it would report more
+    # outcomes than there were requests.
+    charts = summary._charts
+    if not charts:
+        fail("Summary has no chart")
+    values = [str(ref) for chart in charts for series in chart.series for ref in (series.val.numRef.f,)]
+    if not any(ref.endswith("$B$10") for ref in values):
+        fail(f"the summary chart does not reach the outcome rows: {values}")
+    if any(ref.endswith("$B$6") for ref in values):
+        fail(f"the summary chart plots the double-counted 'Found' row: {values}")
+
     print(f"OK {path}")
     print(f"  sheets: {workbook.sheetnames}")
     print(f"  results: {results.max_row - 1} rows, filter {results.auto_filter.ref}")
     print(f"  missing: {missing.max_row - 1} rows")
     print(f"  multiple: {multiple.max_row - 1} rows")
+    print(f"  chart series: {values}")
 
 
 if __name__ == "__main__":

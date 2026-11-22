@@ -15,10 +15,11 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 use zeidex_engine::config::{self, RuntimeConfig, SettingValue};
 use zeidex_storage::{SearchEngine, SearchSettings};
 
+use super::dialogs;
 use crate::index_service::IndexService;
 use crate::state::AppState;
 
@@ -105,6 +106,21 @@ pub fn settings_snapshot(state: State<'_, AppState>) -> Result<SettingsSnapshot,
     )
 }
 
+/// Asks the user for a folder to add as a scan root.
+///
+/// The dialog runs in Rust for the same reason every other picker does: the
+/// page asks for a folder, the user chooses one, and the path becomes readable
+/// only because they did. Returns `None` when the dialog was dismissed.
+#[tauri::command(async)]
+pub fn settings_pick_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    title: Option<String>,
+) -> Result<Option<String>, String> {
+    let picked = dialogs::pick_folder(&app, &state.paths, title)?;
+    Ok(picked.map(|path| path.display().to_string()))
+}
+
 #[tauri::command(async)]
 pub fn settings_update(
     state: State<'_, AppState>,
@@ -158,6 +174,10 @@ fn apply_patch(
             RuntimeConfig::load()
         }
     };
+
+    // A saved root is a read capability: apply the file's values, not the
+    // patch's, so a root the parser rejected grants nothing.
+    state.paths.set_roots(&config.file_scan_extra_roots);
 
     let mut warning = None;
     {

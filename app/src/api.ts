@@ -69,6 +69,11 @@ export interface PageLayout {
   regions: Region[];
 }
 
+export interface DocumentIndexStatus {
+  enabled: boolean;
+  count: number;
+}
+
 export interface PageResult {
   page_index: number;
   width: number;
@@ -158,6 +163,8 @@ export interface Recommendation {
   reason: string;
   reason_ar: string;
   downgraded: boolean;
+  /** The recommended pack needs more RAM than the device can give it. */
+  insufficient_memory: boolean;
   ocr_concurrency: number;
   batch_chunk: number;
   index_threads: number;
@@ -177,11 +184,11 @@ export interface AdvisorView {
 }
 
 export interface ModelVerifyView {
-  packId: string;
+  pack_id: string;
   ok: boolean;
   problems: string[];
-  checkedFiles: number;
-  checkedBytes: number;
+  checked_files: number;
+  checked_bytes: number;
 }
 
 export interface ModelSampleView {
@@ -211,14 +218,14 @@ export type DownloadPhase =
   | "error";
 
 export interface DownloadProgress {
-  packId: string;
+  pack_id: string;
   phase: DownloadPhase;
   file: string | null;
-  fileIndex: number;
-  fileCount: number;
+  file_index: number;
+  file_count: number;
   downloaded: number;
   total: number;
-  speedBps: number;
+  speed_bps: number;
   message: string | null;
 }
 
@@ -360,6 +367,10 @@ export const api = {
     invoke<LaunchResult[]>("search", { query, limit }),
   calcEval: (query: string) => invoke<Calculation | null>("calc_eval", { query }),
   bootstrapIndex: () => invoke<number>("bootstrap_index"),
+  indexPause: () => invoke<boolean>("index_pause"),
+  indexResume: () => invoke<boolean>("index_resume"),
+  indexCancel: () => invoke<boolean>("index_cancel"),
+  indexControlState: () => invoke<string>("index_control_state"),
   candidateCount: () => invoke<number>("candidate_count"),
   recordUsage: (candidateId: string, action: string) =>
     invoke<void>("record_usage", { candidateId, action }),
@@ -381,32 +392,75 @@ export const api = {
   configPath: () => invoke<string>("config_path"),
   appVersion: () => invoke<string>("app_version"),
   settingsSnapshot: () => invoke<AppSettings>("settings_snapshot"),
+  settingsPickFolder: (title?: string) =>
+    invoke<string | null>("settings_pick_folder", { title }),
   settingsUpdate: (patch: SettingsPatch) =>
     invoke<SettingsUpdate>("settings_update", { patch }),
   translateText: (text: string, targetLang: string) =>
     invoke<TranslationOutcome>("translate_text", { text, targetLang }),
   ocrModelsStatus: () => invoke<ModelsStatus>("ocr_models_status"),
+  // Rust opens the dialog and records the chosen path as readable, so the page
+  // never decides what the next command touches. `null` = dialog dismissed.
+  ocrPickFile: (title?: string, filterName?: string) =>
+    invoke<string | null>("ocr_pick_file", { title, filterName }),
   ocrPagePreview: (path: string, page = 0, maxSide = 1400) =>
     invoke<PagePreview>("ocr_page_preview", { path, page, maxSide }),
   ocrProcessImage: (path: string) => invoke<PageResult>("ocr_process_image", { path }),
+  documentExtractText: (path: string) =>
+    invoke<PageResult[]>("document_extract_text", { path }),
   ocrProcessPdf: (path: string) => invoke<PageResult[]>("ocr_process_pdf", { path }),
   ocrCancel: () => invoke<boolean>("ocr_cancel"),
   ocrProcessPdfRange: (path: string, firstPage: number, lastPage: number) =>
     invoke<PageResult[]>("ocr_process_pdf_range", { path, firstPage, lastPage }),
-  exportDocx: (page: PageResult, path: string) =>
-    invoke<void>("export_docx", { page, path }),
-  exportDocxPages: (pages: PageResult[], path: string) =>
-    invoke<void>("export_docx_pages", { pages, path }),
-  exportXlsx: (page: PageResult, path: string) =>
-    invoke<void>("export_xlsx", { page, path }),
-  exportXlsxPages: (pages: PageResult[], path: string) =>
-    invoke<void>("export_xlsx_pages", { pages, path }),
+  // Rust opens the save dialog and writes the file, so the page never chooses
+  // the path it writes to. `null` means the dialog was dismissed.
+  exportDocxPages: (
+    pages: PageResult[],
+    defaultName?: string,
+    title?: string,
+    filterName?: string,
+  ) =>
+    invoke<string | null>("export_docx_pages", {
+      pages,
+      defaultName,
+      title,
+      filterName,
+    }),
+  exportXlsxPages: (
+    pages: PageResult[],
+    defaultName?: string,
+    title?: string,
+    filterName?: string,
+  ) =>
+    invoke<string | null>("export_xlsx_pages", {
+      pages,
+      defaultName,
+      title,
+      filterName,
+    }),
+  documentIndexStatus: () => invoke<DocumentIndexStatus>("document_index_status"),
+  documentSetIndexing: (enabled: boolean) =>
+    invoke<boolean>("document_set_indexing", { enabled }),
+  documentTextStore: (
+    path: string,
+    body: string,
+    pageCount?: number,
+    source?: string,
+  ) =>
+    invoke<number>("document_text_store", { path, body, pageCount, source }),
+  documentTextRemove: (path: string) => invoke<boolean>("document_text_remove", { path }),
+  documentTextClear: () => invoke<number>("document_text_clear"),
   batchParse: (text: string) => invoke<ParsedList>("batch_parse", { text }),
-  batchImport: (path: string) => invoke<ParsedList>("batch_import", { path }),
+  // The picker is opened by the Rust command, so the page never chooses the
+  // path it reads. `null` means the dialog was dismissed.
+  batchImport: (title?: string, filterName?: string) =>
+    invoke<ParsedList | null>("batch_import", { title, filterName }),
   batchSearch: (entries: string[], threshold: number) =>
     invoke<BatchReport>("batch_search", { entries, threshold }),
-  batchExport: (report: BatchReport, path: string) =>
-    invoke<void>("batch_export", { report, path }),
+  // Likewise for the save dialog: Rust asks, writes, and returns the path it
+  // actually wrote, or `null` when the dialog was dismissed.
+  batchExport: (report: BatchReport, title?: string, filterName?: string) =>
+    invoke<string | null>("batch_export", { report, title, filterName }),
   modelsCatalog: () => invoke<ModelPackView[]>("models_catalog"),
   modelsAdvisor: () => invoke<AdvisorView>("models_advisor"),
   modelsDownload: (packId: string) =>

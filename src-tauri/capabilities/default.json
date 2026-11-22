@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capabilities for the main Zeidex window: launcher search, clipboard history and the OCR studio.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -16,8 +18,6 @@
     "core:window:allow-current-monitor",
     "core:window:allow-minimize",
     "core:window:allow-is-visible",
-    "core:tray:default",
-    "dialog:default",
-    "fs:default"
+    "core:tray:default"
   ]
 }

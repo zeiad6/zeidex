@@ -8,7 +8,16 @@ import Launcher from "./components/Launcher";
 import Models from "./components/Models";
 import OcrStudio from "./components/OcrStudio";
 import Settings from "./components/Settings";
+import ErrorBoundary from "./ErrorBoundary";
 import { clampToScreen, logicalScreen } from "./window-size";
+import {
+  applyTheme,
+  resolveTheme,
+  saveTheme,
+  storedTheme,
+  systemPrefersLight,
+  type ThemeChoice,
+} from "./theme";
 
 type Mode = "launcher" | "ocr" | "settings" | "batch" | "models";
 
@@ -44,7 +53,33 @@ function storedDirection(): boolean {
 export default function App() {
   const [mode, setMode] = useState<Mode>("launcher");
   const [rtl, setRtl] = useState(storedDirection);
+  const [theme, setTheme] = useState<ThemeChoice>(storedTheme);
+  const [osPrefersLight, setOsPrefersLight] = useState(systemPrefersLight);
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
+
+  // `system` must keep following the OS while the window is open, so the media
+  // query is a subscription rather than a value read once at boot.
+  useEffect(() => {
+    let query: MediaQueryList;
+    try {
+      query = window.matchMedia("(prefers-color-scheme: light)");
+    } catch {
+      return;
+    }
+    const onChange = () => setOsPrefersLight(query.matches);
+    setOsPrefersLight(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    applyTheme(resolveTheme(theme, osPrefersLight));
+  }, [theme, osPrefersLight]);
+
+  const setThemeChoice = useCallback((next: ThemeChoice) => {
+    setTheme(next);
+    saveTheme(next);
+  }, []);
 
   const setDirection = useCallback((next: boolean) => {
     setRtl(next);
@@ -111,30 +146,34 @@ export default function App() {
 
   return (
     <div dir={rtl ? "rtl" : "ltr"} lang={rtl ? "ar" : "en"} className="h-full">
-      {mode === "ocr" ? (
-        <OcrStudio rtl={rtl} onBack={() => setMode("launcher")} />
-      ) : mode === "batch" ? (
-        <BatchSearch rtl={rtl} onBack={() => setMode("launcher")} />
-      ) : mode === "models" ? (
-        <Models rtl={rtl} onBack={() => setMode("launcher")} />
-      ) : mode === "settings" ? (
-        <Settings
-          rtl={rtl}
-          indexStatus={indexStatus}
-          onSetRtl={setDirection}
-          onBack={() => setMode("launcher")}
-        />
-      ) : (
-        <Launcher
-          rtl={rtl}
-          indexStatus={indexStatus}
-          onToggleRtl={() => setDirection(!rtl)}
-          onOpenOcr={() => setMode("ocr")}
-          onOpenBatch={() => setMode("batch")}
-          onOpenModels={() => setMode("models")}
-          onOpenSettings={() => setMode("settings")}
-        />
-      )}
+      <ErrorBoundary scope={mode} rtl={rtl} onReset={() => setMode("launcher")}>
+        {mode === "ocr" ? (
+          <OcrStudio rtl={rtl} onBack={() => setMode("launcher")} />
+        ) : mode === "batch" ? (
+          <BatchSearch rtl={rtl} onBack={() => setMode("launcher")} />
+        ) : mode === "models" ? (
+          <Models rtl={rtl} onBack={() => setMode("launcher")} />
+        ) : mode === "settings" ? (
+          <Settings
+            rtl={rtl}
+            indexStatus={indexStatus}
+            onSetRtl={setDirection}
+            theme={theme}
+            onSetTheme={setThemeChoice}
+            onBack={() => setMode("launcher")}
+          />
+        ) : (
+          <Launcher
+            rtl={rtl}
+            indexStatus={indexStatus}
+            onToggleRtl={() => setDirection(!rtl)}
+            onOpenOcr={() => setMode("ocr")}
+            onOpenBatch={() => setMode("batch")}
+            onOpenModels={() => setMode("models")}
+            onOpenSettings={() => setMode("settings")}
+          />
+        )}
+      </ErrorBoundary>
     </div>
   );
 }

@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::State;
 use zeidex_engine::{LaunchResult, LaunchResultAction};
-use zeidex_storage::SearchSettings;
+use zeidex_storage::{DocumentHit, SearchSettings};
 
 use crate::index_service::IndexService;
 use crate::state::AppState;
@@ -27,6 +27,27 @@ pub fn search(
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         engine.search(&query, limit)
     };
+    // Text the Studio recognized, indexed locally: a file is findable by a
+    // phrase inside it. A database error here must not break the launcher — the
+    // name results above are already correct — so it is reported to stderr and
+    // the search returns what it has. The same applies to the settings read
+    // below, which is why it stays a hard error only for the web row.
+    let document_hits = if query.trim().chars().count() >= MIN_CONTENT_QUERY_CHARS {
+        let store = state
+            .store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match store.search_document_text(&query, MAX_CONTENT_HITS) {
+            Ok(hits) => hits,
+            Err(err) => {
+                eprintln!("zeidex search: document text lookup failed: {err}");
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    merge_document_hits(&mut results, document_hits);
     // The web row is composed here, not in the engine: it depends on the stored
     // settings and matches no indexed candidate. It is appended last so it can
     // never outrank a real local match.
@@ -43,6 +64,54 @@ pub fn search(
         results.push(web);
     }
     Ok(results)
+}
+
+/// How many content hits one query may add. Two keeps the panel about files
+/// first while still surfacing the scan the user was actually looking for.
+const MAX_CONTENT_HITS: usize = 2;
+
+/// Shortest query that searches document text. A single letter would match
+/// nearly every stored page and bury the name matches the user typed.
+const MIN_CONTENT_QUERY_CHARS: usize = 3;
+
+/// Append content hits for files the name search did not already return.
+///
+/// A content hit is a real file, so it opens like any other result. Its id is
+/// prefixed `doc:` because it has no candidate row: `record_usage` would find
+/// nothing to bump, which is harmless and keeps the launcher's usage table
+/// about names the user actually launched.
+fn merge_document_hits(results: &mut Vec<LaunchResult>, hits: Vec<DocumentHit>) {
+    if hits.is_empty() {
+        return;
+    }
+    let known: std::collections::HashSet<String> =
+        results.iter().map(|result| result.path.clone()).collect();
+    for hit in hits {
+        if known.contains(&hit.path) {
+            continue;
+        }
+        let title = hit
+            .path
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(&hit.path)
+            .to_string();
+        results.push(LaunchResult {
+            id: format!("doc:{}", hit.path),
+            kind: "document".to_string(),
+            title,
+            subtitle: Some(hit.snippet),
+            path: hit.path.clone(),
+            // Below every scored candidate: a name match outranks a content
+            // match, and a content match still outranks the web row.
+            score: 0,
+            action: LaunchResultAction::Open {
+                path: hit.path.clone(),
+            },
+            icon: None,
+        });
+    }
 }
 
 /// The "search the web for …" row, or `None` when the user turned web search off
@@ -89,6 +158,40 @@ pub async fn bootstrap_index(service: State<'_, IndexService>) -> Result<usize, 
     tauri::async_runtime::spawn_blocking(move || service.full_index_blocking())
         .await
         .map_err(|err| err.to_string())?
+}
+
+/// Parks the running walk after its current entry. `true` when a walk was
+/// running and is now paused; `false` when nothing was running or it was
+/// already paused, so the UI never claims a pause that did not happen.
+#[tauri::command(async)]
+pub fn index_pause(service: State<'_, IndexService>) -> bool {
+    service.pause()
+}
+
+#[tauri::command(async)]
+pub fn index_resume(service: State<'_, IndexService>) -> bool {
+    service.resume()
+}
+
+/// Stops the walk. The database writer skips its stale-row sweep, so the index
+/// keeps every row the walk did not reach; the next complete walk reconciles it.
+#[tauri::command(async)]
+pub fn index_cancel(service: State<'_, IndexService>) -> bool {
+    service.cancel()
+}
+
+/// The live switch state, for a UI that mounts while a walk is already parked.
+/// `"idle"` means no walk is running — distinct from `"running"`, so a caller
+/// never offers to pause nothing.
+#[tauri::command(async)]
+pub fn index_control_state(service: State<'_, IndexService>) -> String {
+    match service.control_state() {
+        None => "idle",
+        Some(zeidex_indexing::IndexRun::Running) => "running",
+        Some(zeidex_indexing::IndexRun::Paused) => "paused",
+        Some(zeidex_indexing::IndexRun::Cancelled) => "cancelled",
+    }
+    .to_string()
 }
 
 #[tauri::command(async)]
@@ -182,6 +285,54 @@ mod tests {
                 );
             }
             other => panic!("expected a web action, got {other:?}"),
+        }
+    }
+
+    fn hit(path: &str, snippet: &str) -> DocumentHit {
+        DocumentHit {
+            path: path.to_string(),
+            snippet: snippet.to_string(),
+            page_count: 1,
+            source: "ocr".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_content_hit_never_duplicates_a_name_match() {
+        let mut results = vec![LaunchResult {
+            id: "file:/docs/report.pdf".to_string(),
+            kind: "file".to_string(),
+            title: "report.pdf".to_string(),
+            subtitle: None,
+            path: "/docs/report.pdf".to_string(),
+            score: 120,
+            action: LaunchResultAction::Open {
+                path: "/docs/report.pdf".to_string(),
+            },
+            icon: None,
+        }];
+        merge_document_hits(&mut results, vec![hit("/docs/report.pdf", "revenue grew")]);
+        assert_eq!(results.len(), 1, "the same file is not listed twice");
+        assert_eq!(results[0].score, 120, "and the scored row is untouched");
+    }
+
+    #[test]
+    fn a_content_hit_is_openable_and_carries_its_excerpt() {
+        let mut results = Vec::new();
+        merge_document_hits(
+            &mut results,
+            vec![hit("/scans/invoice-2024.pdf", "المجموع 4,500")],
+        );
+        assert_eq!(results.len(), 1);
+        let row = &results[0];
+        assert_eq!(row.kind, "document");
+        assert_eq!(row.title, "invoice-2024.pdf");
+        assert_eq!(row.subtitle.as_deref(), Some("المجموع 4,500"));
+        assert_eq!(row.id, "doc:/scans/invoice-2024.pdf");
+        assert_eq!(row.score, 0, "below every name match");
+        match &row.action {
+            LaunchResultAction::Open { path } => assert_eq!(path, "/scans/invoice-2024.pdf"),
+            other => panic!("expected an open action, got {other:?}"),
         }
     }
 }

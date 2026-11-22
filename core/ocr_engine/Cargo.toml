@@ -9,6 +9,10 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1"
+# Legacy code pages for plain-text documents. Already in the tree through
+# `reqwest`, so this adds no crate; it replaces a hand-rolled decoder that would
+# have been wrong for every Arabic Windows file.
+encoding_rs = "0.8"
 image = "0.25"
 ort = { version = "=2.0.0-rc.15", default-features = false, features = [
     "half",
@@ -22,10 +26,12 @@ serde_json = "1"
 thiserror = "2"
 unicode-bidi = "0.3"
 unicode-normalization = "0.1"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 # The pack smoke test resolves a downloaded pack through the same catalog the
 # installer writes, so the layout it exercises is the real one.
+tempfile = "3"
 zeidex-models = { path = "../models" }
 
 [features]

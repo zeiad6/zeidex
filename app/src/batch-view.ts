@@ -205,7 +205,10 @@ export function extensionOf(name: string): string {
  * alone does not tell a user whether that is strict or loose.
  */
 export function thresholdLabel(value: number, rtl: boolean): string {
-  if (value >= 100) return rtl ? "مطابقة تامة فقط" : "Exact only";
+  // A stem equality scores 100 too (`report` finds `report.pdf`), so "exact"
+  // alone would promise something the search does not do.
+  if (value >= 100)
+    return rtl ? "الاسم نفسه، بامتداد أو بدونه" : "Same name, with or without its extension";
   if (value >= 90) return rtl ? "صارم جداً" : "Very strict";
   if (value >= 80) return rtl ? "ثقة عالية" : "High confidence";
   if (value >= 65) return rtl ? "متوازن" : "Balanced";

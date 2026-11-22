@@ -168,6 +168,10 @@ pub struct Recommendation {
     /// True when the class's preferred pack was stepped down because of RAM or
     /// disk, so the UI can say why the "obvious" answer was not chosen.
     pub downgraded: bool,
+    /// True when even the lightest pack is bigger than the memory budget. The
+    /// recommendation is still returned — it is the best available answer — but
+    /// the UI must not present it as a comfortable fit.
+    pub insufficient_memory: bool,
     /// How many OCR pages the pipeline should process at once on this machine.
     pub ocr_concurrency: usize,
     /// How many files a batch search should scan per worker chunk.
@@ -188,9 +192,6 @@ pub fn preferred_pack(class: DeviceClass) -> &'static ModelPack {
         .find(|pack| pack.tier == tier)
         .unwrap_or_else(|| catalog::default_pack())
 }
-
-/// Free space kept for the database, the index and the user's own files.
-const DISK_HEADROOM_MB: u64 = 2_048;
 
 /// The advisor.
 ///
@@ -242,6 +243,22 @@ pub fn recommend(profile: &DeviceProfile) -> Recommendation {
         chosen = step_down(chosen);
     }
 
+    // The loop cannot step below Compact, so a machine that is too small for
+    // even the lightest pack left the loop with a pack that does not fit and a
+    // reason that only named the packs it had stepped away from. Saying so is the
+    // difference between "we picked the smallest" and "nothing here fits".
+    let insufficient_memory = chosen.ram_mb.saturating_mul(5) / 4 > ram_budget;
+    if insufficient_memory {
+        reason_parts.push(format!(
+            "Even {} needs about {} MB, more than the {} MB budget on this machine; OCR may be slow or unavailable until memory is freed.",
+            chosen.name, chosen.ram_mb, ram_budget
+        ));
+        reason_ar_parts.push(format!(
+            "حتى {} يحتاج نحو {} م.ب، أكثر من الميزانية المتاحة {} م.ب؛ قد تكون قراءة النصوص بطيئة أو غير متاحة حتى تُحرَّر الذاكرة.",
+            chosen.name_ar, chosen.ram_mb, ram_budget
+        ));
+    }
+
     if reason_parts.is_empty() {
         reason_parts.push(format!(
             "{} matches this {} machine: {} logical cores, {} GB RAM.",
@@ -275,6 +292,7 @@ pub fn recommend(profile: &DeviceProfile) -> Recommendation {
         reason: reason_parts.join(" "),
         reason_ar: reason_ar_parts.join(" "),
         downgraded,
+        insufficient_memory,
         ocr_concurrency,
         batch_chunk,
         index_threads,
@@ -289,11 +307,15 @@ pub fn recommend(profile: &DeviceProfile) -> Recommendation {
 /// the advisor never plans an install that would swap. An unmeasured profile is
 /// not guessed at: with neither figure the budget is unlimited and the tier
 /// alone decides.
+///
+/// `available_ram_mb == 0` on a machine whose total is known means "nothing is
+/// free", not "unknown". Treating it as unknown gave a fully committed 16 GB
+/// machine a 4 GB budget and a recommendation of the heaviest pack with
+/// `downgraded: false`, which is the one case the free-RAM cap exists to catch.
 fn ram_budget_mb(profile: &DeviceProfile) -> u64 {
     match (profile.total_ram_mb, profile.available_ram_mb) {
         (0, 0) => u64::MAX,
         (0, available) => available,
-        (total, 0) => total / 4,
         (total, available) => (total / 4).min(available),
     }
 }
@@ -304,8 +326,9 @@ fn fits_on_disk(pack: &ModelPack, free_disk_mb: u64) -> bool {
     if free_disk_mb == 0 {
         return true;
     }
-    let needed = pack.download_bytes() / 1_000_000 + DISK_HEADROOM_MB;
-    free_disk_mb >= needed
+    // One requirement, shared with the downloader, so the advisor cannot refuse
+    // a pack the installer would accept or accept one it would refuse.
+    free_disk_mb >= crate::install::disk_requirement_mb(pack)
 }
 
 fn step_down(pack: &'static ModelPack) -> &'static ModelPack {
@@ -389,11 +412,75 @@ mod tests {
     #[test]
     fn a_full_disk_steps_down() {
         let mut device = profile(16, 65_536);
-        device.free_disk_mb = 1_000;
+        // Enough for the compact pack (about 155 MB) and not for the balanced
+        // one (about 359 MB).
+        device.free_disk_mb = 300;
         let answer = recommend(&device);
         assert_eq!(answer.pack_id, "ppocrv4-mobile");
         assert!(answer.downgraded);
         assert!(answer.reason.contains("disk"));
+    }
+
+    /// The advisor and the downloader share one disk requirement. They used to
+    /// disagree by a factor of eight — the advisor demanded two gigabytes of
+    /// headroom — so a device with 500 MB free was told the Precision pack did
+    /// not fit and then allowed to install it.
+    #[test]
+    fn a_disk_that_fits_the_installer_fits_the_advisor() {
+        let mut device = profile(16, 65_536);
+        let pack = crate::catalog::pack("ppocrv5-server").expect("precision pack");
+        device.free_disk_mb = crate::install::disk_requirement_mb(pack);
+        assert_eq!(recommend(&device).pack_id, "ppocrv5-server");
+        assert!(!recommend(&device).downgraded);
+    }
+
+    /// The step-down loop cannot go below the compact pack, so a machine too
+    /// small for even that used to be told the compact pack "matches this
+    /// machine" with `downgraded: true` and no word about it not fitting.
+    #[test]
+    fn a_machine_too_small_for_every_pack_says_so() {
+        let device = profile(16, 1_024);
+        let answer = recommend(&device);
+        assert_eq!(answer.pack_id, "ppocrv4-mobile");
+        assert!(
+            answer.insufficient_memory,
+            "the lightest pack needs more than a 256 MB budget: {answer:?}"
+        );
+        assert!(
+            answer.reason.contains("Even "),
+            "the reason must say the chosen pack does not fit either: {}",
+            answer.reason
+        );
+        assert!(answer.reason_ar.contains("حتى "), "{}", answer.reason_ar);
+    }
+
+    /// Zero available memory on a machine whose total is known means the machine
+    /// is full, not that the figure is unknown. Reading it as unknown handed a
+    /// committed 16 GB machine a 4 GB budget and the heaviest pack.
+    #[test]
+    fn no_free_memory_is_treated_as_full_not_unknown() {
+        let mut device = profile(16, 16_384);
+        device.available_ram_mb = 0;
+        let answer = recommend(&device);
+        assert_eq!(answer.pack_id, "ppocrv4-mobile");
+        assert!(answer.insufficient_memory);
+        assert!(answer.downgraded);
+    }
+
+    /// Neither figure known is still "unmeasured", and an unmeasured machine is
+    /// not punished for it.
+    #[test]
+    fn an_unmeasured_profile_is_not_treated_as_a_full_one() {
+        let mut device = profile(16, 65_536);
+        device.total_ram_mb = 0;
+        device.available_ram_mb = 0;
+        let answer = recommend(&device);
+        // The class itself drops a point without a RAM figure, so the pack is
+        // whatever that class prefers; what matters here is that the memory
+        // budget is unlimited rather than zero.
+        assert_eq!(answer.pack_id, preferred_pack(answer.device_class).id);
+        assert!(!answer.insufficient_memory);
+        assert!(!answer.reason.contains("memory"), "{}", answer.reason);
     }
 
     #[test]

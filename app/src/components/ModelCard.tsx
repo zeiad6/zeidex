@@ -91,7 +91,7 @@ export default function ModelCard({
   onConfirmRemove,
   onToggleDetails,
 }: ModelCardProps) {
-  const mine = progress?.packId === pack.id ? progress : null;
+  const mine = progress?.pack_id === pack.id ? progress : null;
   const downloading = mine !== null && isActivePhase(mine.phase);
   const installed = pack.bundled || pack.state === "installed";
   const percent = mine ? percentOf(mine.downloaded, mine.total) : 0;
@@ -195,7 +195,7 @@ export default function ModelCard({
             </span>
             <span>
               {downloading
-                ? formatSpeed(mine.speedBps)
+                ? formatSpeed(mine.speed_bps)
                 : `${formatBytes(Math.max(0, mine.total - mine.downloaded))} ${t("left", "متبقٍ")}`}
             </span>
           </div>

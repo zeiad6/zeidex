@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
@@ -21,7 +20,11 @@ import {
   updateRegionText,
 } from "./ocr/edits";
 import { parsePageRange } from "../page-range";
-import { SUPPORTED_DOCUMENT_EXTENSIONS, isSupportedDocument } from "../documents";
+import {
+  isSupportedDocument,
+  isTextDocument,
+  textDocumentSource,
+} from "../documents";
 
 type Status =
   | { kind: "idle" }
@@ -37,6 +40,10 @@ type EditMode = "regions" | "text";
 export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: boolean }) {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [pages, setPages] = useState<PageResult[]>([]);
+  // Mirrors the "index recognized text" setting, read once per Studio mount.
+  // The backend re-checks it on write, so a stale copy can only cause a wasted
+  // call, never an unwanted row.
+  const indexTextRef = useRef(true);
   const [activePage, setActivePage] = useState(0);
   const [preview, setPreview] = useState<PagePreview | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -69,6 +76,10 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
 
   const page = pages[activePage];
   const isPdf = filePath?.toLowerCase().endsWith(".pdf") ?? false;
+  // A `.docx`, `.xlsx` or text file already holds characters. Running the
+  // detector over its bytes would recognize nothing; the reader extracts the
+  // text and returns the same page shape, so everything downstream is shared.
+  const textDocument = isTextDocument(filePath ?? "");
   // `page_index` is the document's own index, which differs from the position
   // in `pages` after a page-window run.
   const previewPage = page?.page_index ?? activePage;
@@ -96,6 +107,22 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
       });
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    api
+      .documentIndexStatus()
+      .then((status) => {
+        if (live) indexTextRef.current = status.enabled;
+      })
+      .catch(() => {
+        // The setting is unreadable: stay with the default, which is "on", and
+        // let the write path decide for real.
+      });
+    return () => {
+      live = false;
     };
   }, []);
 
@@ -134,9 +161,10 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     };
   }, []);
 
-  // Load the preview for the active page, cached per file+page.
+  // Load the preview for the active page, cached per file+page. A text document
+  // has no page image, so asking the PDF renderer for one would only fail.
   useEffect(() => {
-    if (!filePath || pages.length === 0) {
+    if (!filePath || pages.length === 0 || isTextDocument(filePath)) {
       setPreview(null);
       return;
     }
@@ -195,13 +223,13 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
       return;
     }
     try {
-      const selected = await open({
-        multiple: false,
-        filters: [
-          { name: "Documents", extensions: [...SUPPORTED_DOCUMENT_EXTENSIONS] },
-        ],
-      });
-      if (typeof selected === "string") loadFile(selected);
+      // The dialog and the file's extension filter live in Rust: the page asks
+      // for a document, and cannot widen what the picker will hand back.
+      const selected = await api.ocrPickFile(
+        rtl ? "اختر مستنداً" : "Choose a document",
+        rtl ? "المستندات" : "Documents",
+      );
+      if (selected) loadFile(selected);
     } catch (err) {
       setStatus({ kind: "error", message: String(err) });
     }
@@ -261,7 +289,16 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
       setStatus({ kind: "error", message: range.message });
       return;
     }
-    setStatus({ kind: "working", message: rtl ? "يعمل…" : "Starting…" });
+    setStatus({
+      kind: "working",
+      message: isTextDocument(filePath)
+        ? rtl
+          ? "يستخرج النص…"
+          : "Extracting text…"
+        : rtl
+          ? "يعمل…"
+          : "Starting…",
+    });
     setActiveRegion(null);
     setDraft(null);
     setProgress(null);
@@ -271,16 +308,25 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     runningRef.current = true;
     setRunning(true);
     try {
-      const results = !isPdf
-        ? [await api.ocrProcessImage(filePath)]
-        : range.kind === "range"
-          ? await api.ocrProcessPdfRange(filePath, range.first, range.last)
-          : await api.ocrProcessPdf(filePath);
+      const results = isTextDocument(filePath)
+        ? await api.documentExtractText(filePath)
+        : !isPdf
+          ? [await api.ocrProcessImage(filePath)]
+          : range.kind === "range"
+            ? await api.ocrProcessPdfRange(filePath, range.first, range.last)
+            : await api.ocrProcessPdf(filePath);
       previewCache.current.clear();
       setPages(results);
       setActivePage(0);
       setProgress(null);
       setStatus({ kind: "idle" });
+      // The recognized text is the only copy of a scan's contents. Keeping it
+      // locally makes the file findable by a phrase inside it; it never leaves
+      // the machine and the setting can turn it off.
+      indexRecognizedText(
+        results,
+        isTextDocument(filePath) ? textDocumentSource(filePath) : "ocr",
+      );
     } catch (err) {
       setProgress(null);
       const message = String(err);
@@ -328,20 +374,49 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     setPages(replacePage(pages, activePage, updateCellText(page, regionIndex, cellIndex, text)));
   };
 
+  // Stores the text as it stands. Called after a run and again after an
+  // export, because an export is the moment the user finalized their edits:
+  // the index should describe what they saved, not the raw first pass.
+  const indexRecognizedText = useCallback(
+    (
+      finalized: PageResult[],
+      source: "ocr" | "docx" | "xlsx" | "odt" | "text",
+    ) => {
+      if (!indexTextRef.current || !filePath) return;
+      const body = finalized
+        .map((page) => page.text)
+        .filter((text) => text.trim().length > 0)
+        .join("\n\n");
+      if (body.trim().length === 0) return;
+      void api
+        .documentTextStore(filePath, body, finalized.length, source)
+        .catch((err) => console.warn("zeidex: could not index recognized text", err));
+    },
+    [filePath],
+  );
+
   const exportAs = async (kind: "docx" | "xlsx") => {
     const finalized = commitDraft();
-    const target = await save({
-      filters: [
-        kind === "docx"
-          ? { name: "Word", extensions: ["docx"] }
-          : { name: "Excel", extensions: ["xlsx"] },
-      ],
-      defaultPath: kind === "docx" ? "zeidex.docx" : "zeidex.xlsx",
-    }).catch(() => null);
-    if (!target) return;
+    const name = kind === "docx" ? "zeidex.docx" : "zeidex.xlsx";
+    const title = kind === "docx"
+      ? rtl ? "حفظ المستند" : "Save the document"
+      : rtl ? "حفظ المصنف" : "Save the workbook";
+    const filterName = kind === "docx"
+      ? rtl ? "مستند Word" : "Word document"
+      : rtl ? "مصنف Excel" : "Excel workbook";
     try {
-      if (kind === "docx") await api.exportDocxPages(finalized, target);
-      else await api.exportXlsxPages(finalized, target);
+      // Rust opens the save dialog and returns the path it wrote, or null when
+      // the dialog was dismissed.
+      const target = kind === "docx"
+        ? await api.exportDocxPages(finalized, name, title, filterName)
+        : await api.exportXlsxPages(finalized, name, title, filterName);
+      if (!target) return;
+      // Exporting re-stores the text as edited, so the index describes what was
+      // saved rather than the run that preceded the edits.
+      indexRecognizedText(
+        finalized,
+        isTextDocument(filePath ?? "") ? textDocumentSource(filePath ?? "") : "ocr",
+      );
       setStatus({ kind: "done", message: `${rtl ? "تم التصدير إلى" : "Exported to"} ${target}` });
     } catch (err) {
       setStatus({ kind: "error", message: String(err) });
@@ -482,7 +557,17 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                   size={13}
                   className={working ? "animate-spin" : ""}
                 />
-                {working ? (rtl ? "يعمل…" : "Working…") : rtl ? "تشغيل OCR" : "Run OCR"}
+                {working
+                  ? rtl
+                    ? "يعمل…"
+                    : "Working…"
+                  : textDocument
+                    ? rtl
+                      ? "استخراج النص"
+                      : "Extract text"
+                    : rtl
+                      ? "تشغيل OCR"
+                      : "Run OCR"}
               </button>
             )}
           </span>
@@ -575,6 +660,13 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
               showBoxes={showBoxes}
               onSelect={setActiveRegion}
               rtl={rtl}
+              emptyMessage={
+                textDocument
+                  ? rtl
+                    ? "ملف نصي — لا صورة صفحة له"
+                    : "A text document has no page image"
+                  : undefined
+              }
             />
 
             {working && progress && progress.total > 1 && (

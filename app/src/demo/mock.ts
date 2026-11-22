@@ -99,7 +99,9 @@ export function installMock() {
           Number(args.threshold ?? 70),
         );
       case "batch_export":
-        return null;
+        // The demo has no disk; the path is the one the real command would
+        // have returned so the flow stays demonstrable.
+        return "/home/you/Documents/zeidex-batch-2026-11-22.xlsx";
       case "open_target":
       case "reveal_target":
         return null;
@@ -133,27 +135,27 @@ export function installMock() {
         for (const fraction of [0.08, 0.34, 0.61, 0.88]) {
           await delay(240);
           emit("models-progress", {
-            packId: id,
+            pack_id: id,
             phase: "downloading",
             file,
-            fileIndex: 1,
-            fileCount: pack.files.length,
+            file_index: 1,
+            file_count: pack.files.length,
             downloaded: Math.round(total * fraction),
             total,
-            speedBps: 4_600_000,
+            speed_bps: 4_600_000,
             message: null,
           });
         }
         for (const phase of ["verifying", "installing"] as const) {
           emit("models-progress", {
-            packId: id,
+            pack_id: id,
             phase,
             file,
-            fileIndex: pack.files.length,
-            fileCount: pack.files.length,
+            file_index: pack.files.length,
+            file_count: pack.files.length,
             downloaded: total,
             total,
-            speedBps: 0,
+            speed_bps: 0,
             message: null,
           });
           await delay(320);
@@ -173,14 +175,14 @@ export function installMock() {
             : entry,
         );
         emit("models-progress", {
-          packId: id,
+          pack_id: id,
           phase: "done",
           file: null,
-          fileIndex: pack.files.length,
-          fileCount: pack.files.length,
+          file_index: pack.files.length,
+          file_count: pack.files.length,
           downloaded: total,
           total,
-          speedBps: 0,
+          speed_bps: 0,
           message: null,
         });
         return demoPacks.find((entry) => entry.id === id);
@@ -207,11 +209,11 @@ export function installMock() {
         const id = String(args.packId ?? "");
         const pack = demoPacks.find((entry) => entry.id === id);
         return {
-          packId: id,
+          pack_id: id,
           ok: true,
           problems: [],
-          checkedFiles: pack?.files.length ?? 0,
-          checkedBytes: pack?.installed_bytes ?? 0,
+          checked_files: pack?.files.length ?? 0,
+          checked_bytes: pack?.installed_bytes ?? 0,
         };
       }
       case "models_benchmark": {
@@ -273,14 +275,6 @@ export function installMock() {
       }
       case "plugin:dialog|open":
         return DEMO_PDF;
-      case "plugin:dialog|save": {
-        // The plugin passes `{ options: { defaultPath } }`.
-        const options = (args.options ?? args) as { defaultPath?: string };
-        const suggested = String(options.defaultPath ?? "");
-        return suggested.endsWith(".xlsx")
-          ? "/home/you/Documents/zeidex-batch-2026-11-22.xlsx"
-          : "/home/you/Documents/zeidex-export.docx";
-      }
       case "plugin:event|listen": {
         const event = String(args.event ?? "");
         const handler = Number(args.handler ?? 0);

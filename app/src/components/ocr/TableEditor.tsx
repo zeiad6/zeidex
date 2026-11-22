@@ -60,7 +60,7 @@ export default function TableEditor({
                         width: `${Math.min(28, Math.max(5, cell.text.length + 3))}ch`,
                       }}
                       aria-label={`${rtl ? "صف" : "row"} ${cell.row + 1} ${rtl ? "عمود" : "column"} ${cell.col + 1}`}
-                      className="w-full min-w-[3.5rem] bg-transparent px-2 py-1.5 text-[0.8rem] text-zinc-100 outline-none transition placeholder:text-zinc-700 focus:bg-accent-400/10"
+                      className="w-full min-w-[3.5rem] bg-transparent px-2 py-1.5 text-[0.8rem] text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:bg-accent-400/10"
                     />
                   </td>
                 );

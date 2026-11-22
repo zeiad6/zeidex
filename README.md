@@ -109,7 +109,8 @@ One input, four modes. <kbd>Tab</kbd> cycles the filter, <kbd>↑</kbd>/<kbd>↓
 
 | | |
 | --- | --- |
-| **Search** | Fuzzy matching with accent/case folding, alias groups (`alias_code=Visual Studio Code\|Cursor\|Zed`), and a usage-aware re-rank so the thing you open every morning wins ties. The index updates itself while the app runs: a file created, renamed or deleted under a watched root is reflected without pressing Reindex. |
+| **Search** | Fuzzy matching with accent/case folding, alias groups (`alias_code=Visual Studio Code\|Cursor\|Zed`), and a usage-aware re-rank so the thing you open every morning wins ties. The index updates itself while the app runs: a file created, renamed or deleted under a watched root is reflected without pressing Reindex. A full walk can be paused, resumed or cancelled from Settings, and cancelling never deletes rows it did not reach. |
+| **Search inside documents** | The OCR Studio stores the text it recognizes in the local database, so a scan is findable by a phrase inside it (up to two content hits per query, with an excerpt). The switch and a "clear indexed text" action live in Settings → Indexing; nothing leaves the device. |
 | **Calculator** | Type an expression and it is evaluated as you type. <kbd>Enter</kbd> copies the raw, re-parseable number — not the prettified `1,000,000`. |
 | **Clipboard history** | Every text clip is stored locally in SQLite, de-duplicated, searchable, pinnable, and never expires unless you say so. Images are not captured: copying a screenshot leaves the history unchanged. |
 | **Translation** | `tr"` followed by text translates into Arabic, English, French and Spanish. Each target fails independently, so one rate-limited request cannot break the panel. |
@@ -161,7 +162,9 @@ inline instead of being clamped behind your back.
 ### Document Studio
 
 Images and PDFs go in; a structured page comes out. Every box is editable, every table
-is a real table, and the export is a document you can keep working in.
+is a real table, and the export is a document you can keep working in. A `.docx`,
+`.xlsx` or text file is read directly — the button says **Extract text** — so its
+content can be searched and exported without pretending it is a scan.
 
 <table>
   <tr>
@@ -311,7 +314,7 @@ make ocr-test      # real models: OCR (English and Arabic), table grid, accuracy
 | Translate | `tr"` + text |
 | Clipboard history | <kbd>Tab</kbd> to the Clipboard filter |
 | Web search | Type a phrase and pick the web result; type a URL to open it |
-| Documents | **OCR Studio** in the header → **Open file** → **Run OCR** |
+| Documents | **OCR Studio** in the header → **Open file** → **Run OCR** (or **Extract text** for `.docx`/`.xlsx`/`.odt`/text) |
 
 Configuration lives in `~/.zeidex/config`:
 
@@ -411,6 +414,8 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - [x] Editable regions and tables in the Studio
 - [x] `.docx` / `.xlsx` export with RTL support
 - [x] Full RTL interface
+- [x] Pause / resume / cancel a running index walk without losing rows
+- [x] Search inside recognized text (local inverted index, on by default)
 - [x] Better Arabic recognizer — evaluated
       [`arabic_PP-OCRv5_mobile_rec_onnx`](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx)
       (8 MB, same 48 px CTC decoder): 0.30 against 0.50 character error rate on

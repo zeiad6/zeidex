@@ -3,6 +3,9 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::mpsc;
 
+mod control;
+pub use control::{IndexControl, IndexRun};
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CandidateKind {
     App,

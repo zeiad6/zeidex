@@ -7,7 +7,7 @@ use globset::{GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
 use std::sync::mpsc;
 use std::time::UNIX_EPOCH;
-use zeidex_indexing::{Candidate, CandidateKind};
+use zeidex_indexing::{Candidate, CandidateKind, IndexControl};
 
 // One `GlobSet` per path policy: a candidate is normalized once per distinct
 // policy and matched against all patterns of that policy in a single pass.
@@ -24,7 +24,20 @@ fn modified_unix_s(metadata: Option<&std::fs::Metadata>) -> Option<i64> {
 
 const FOLDER_BUDGET_FACTOR: usize = 4;
 
-pub fn discover_local_files_and_folders(config: &RuntimeConfig, tx: mpsc::SyncSender<Candidate>) {
+/// How far a walk may go and the switch that can stop it. Bundled so the
+/// recursive walk keeps a readable signature: depth and control are one
+/// decision ("how much of this tree may I spend"), not two unrelated flags.
+#[derive(Clone, Copy)]
+struct WalkLimit<'a> {
+    max_depth: usize,
+    control: Option<&'a IndexControl>,
+}
+
+pub fn discover_local_files_and_folders(
+    config: &RuntimeConfig,
+    tx: mpsc::SyncSender<Candidate>,
+    control: Option<&IndexControl>,
+) {
     let mut roots = config.file_scan_roots.clone();
     roots.extend(config.file_scan_extra_roots.iter().cloned());
     roots.sort();
@@ -36,6 +49,11 @@ pub fn discover_local_files_and_folders(config: &RuntimeConfig, tx: mpsc::SyncSe
     let mut file_count = 0usize;
     let mut folder_count = 0usize;
     for root in &roots {
+        // A pause between roots parks the walk instead of spinning: the
+        // checkpoint blocks on the control's condition variable.
+        if control.is_some_and(|control| !control.checkpoint()) {
+            return;
+        }
         walk_files(
             root,
             config,
@@ -43,6 +61,7 @@ pub fn discover_local_files_and_folders(config: &RuntimeConfig, tx: mpsc::SyncSe
             &tx,
             &mut file_count,
             &mut folder_count,
+            control,
         );
         if file_count >= config.file_scan_limit {
             break;
@@ -57,6 +76,7 @@ fn walk_files(
     tx: &mpsc::SyncSender<Candidate>,
     file_count: &mut usize,
     folder_count: &mut usize,
+    control: Option<&IndexControl>,
 ) {
     walk_files_with_depth(
         path,
@@ -65,7 +85,10 @@ fn walk_files(
         tx,
         file_count,
         folder_count,
-        config.file_scan_depth,
+        WalkLimit {
+            max_depth: config.file_scan_depth,
+            control,
+        },
     );
 }
 
@@ -80,8 +103,9 @@ fn walk_files_with_depth(
     tx: &mpsc::SyncSender<Candidate>,
     file_count: &mut usize,
     folder_count: &mut usize,
-    max_depth: usize,
+    limit: WalkLimit<'_>,
 ) {
+    let WalkLimit { max_depth, control } = limit;
     if should_exclude_path(path, &config.file_exclude_paths) {
         return;
     }
@@ -132,6 +156,12 @@ fn walk_files_with_depth(
 
     for entry in walker.build().flatten() {
         if *file_count >= config.file_scan_limit {
+            break;
+        }
+        // One atomic load per entry on the normal path; a paused or cancelled
+        // walk stops here, before the stat, so the cost of stopping is a single
+        // directory entry.
+        if control.is_some_and(|control| !control.checkpoint()) {
             break;
         }
 
@@ -282,7 +312,10 @@ pub(crate) fn walk_children(
         &tx,
         &mut file_count,
         &mut folder_count,
-        max_depth,
+        WalkLimit {
+            max_depth,
+            control: None,
+        },
     );
     drop(tx);
     out.extend(rx);
@@ -418,7 +451,7 @@ mod tests {
             ..Default::default()
         };
         let (tx, rx) = mpsc::sync_channel(64);
-        discover_local_files_and_folders(&config, tx);
+        discover_local_files_and_folders(&config, tx, None);
         let walked = rx.try_iter().collect::<Vec<_>>();
         assert!(walked.len() >= 3, "fixture should produce rows: {walked:?}");
 
@@ -510,7 +543,7 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::sync_channel(128);
-        discover_local_files_and_folders(&config, tx);
+        discover_local_files_and_folders(&config, tx, None);
         let candidates = rx.try_iter().collect::<Vec<_>>();
 
         assert!(candidates.iter().any(|candidate| {
@@ -549,7 +582,7 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::sync_channel(32);
-        discover_local_files_and_folders(&config, tx);
+        discover_local_files_and_folders(&config, tx, None);
         let candidates = rx.try_iter().collect::<Vec<_>>();
 
         let file_titles = candidates
@@ -583,7 +616,7 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::sync_channel(32);
-        discover_local_files_and_folders(&config, tx);
+        discover_local_files_and_folders(&config, tx, None);
         let candidates = rx.try_iter().collect::<Vec<_>>();
 
         assert!(

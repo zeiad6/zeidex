@@ -8,6 +8,8 @@
  */
 export interface IndexStatus {
   indexing: boolean;
+  /** The running walk is parked on the user's request. */
+  paused: boolean;
   count: number;
   error: string | null;
 }
@@ -24,6 +26,9 @@ export function parseIndexStatus(payload: unknown): IndexStatus | null {
   }
   return {
     indexing: record.indexing,
+    // A shell built before the pause switch existed sends no field; "not
+    // paused" is the only safe reading, and the footer must still render.
+    paused: record.paused === true,
     count: Math.trunc(record.count),
     error: typeof record.error === "string" ? record.error : null,
   };

@@ -8,6 +8,8 @@ use zeidex_models::ModelPack;
 use zeidex_ocr::OcrEngine;
 use zeidex_storage::SqliteStore;
 
+use crate::commands::policy::PathPolicy;
+
 /// One in-flight model download. Downloads are serialised: two packs writing
 /// staging folders at once would compete for the same disk and the same
 /// progress channel, and the UI has no use for that.
@@ -53,6 +55,16 @@ pub struct AppState {
     pub model_download: Mutex<Option<ModelDownload>>,
     pub pdfium_library: Option<PathBuf>,
     pub db_path: PathBuf,
+    /// The matcher input Batch Search last built, with the store version it was
+    /// built from.
+    ///
+    /// Building it means a query plus five strings and two normalisations per
+    /// indexed file, and a batch screen re-searches whenever the threshold moves.
+    /// Rebuilding on every slider step is the difference between an instant
+    /// re-filter and a visible stall on a large index.
+    pub batch_files: Mutex<Option<(u64, Arc<Vec<zeidex_batch::matcher::BatchFile>>)>>,
+    /// Which paths a command may read. See `commands::policy`.
+    pub paths: PathPolicy,
 }
 
 impl AppState {
@@ -91,6 +103,15 @@ impl AppState {
             eprintln!("zeidex: could not load the search index: {err}");
             QueryEngine::default()
         });
+        // What the shell may read without a pick: its own files, plus the scan
+        // roots the walker already indexes. A root that is configured but
+        // missing is harmless — it grants nothing until it exists.
+        let mut owned = vec![db_path.clone(), models_dir.clone(), models_root.clone()];
+        if let Some(config) = zeidex_engine::config_path::current() {
+            owned.push(config.path);
+        }
+        let paths = PathPolicy::new(owned);
+        paths.set_roots(&config.file_scan_extra_roots);
         Ok(Self {
             engine: Mutex::new(engine),
             store: Mutex::new(store),
@@ -103,7 +124,55 @@ impl AppState {
             model_download: Mutex::new(None),
             pdfium_library,
             db_path,
+            batch_files: Mutex::new(None),
+            paths,
         })
+    }
+
+    /// Checks that a command may read `path`, returning the path to use.
+    ///
+    /// Four answers are possible, in order: the path is inside a scan root, it
+    /// was picked or written by the shell, it belongs to the application, or the
+    /// index knows it. Anything else is refused with a message that says why —
+    /// a silent refusal would look like a missing file.
+    ///
+    /// The index check is last because it costs a query. The lock is taken and
+    /// released here; callers must not already hold it, or `std` would deadlock
+    /// (the mutex is not reentrant).
+    pub fn authorize_read(&self, path: &str) -> Result<PathBuf, String> {
+        let candidate = Path::new(path);
+        if self.paths.permits(candidate).is_some() {
+            return Ok(candidate.to_path_buf());
+        }
+        // The walker stores absolute paths, but a caller can hand back the same
+        // file spelled through a symlink. Compare both spellings against the
+        // index rather than guessing which one the row holds.
+        let resolved = candidate
+            .canonicalize()
+            .unwrap_or_else(|_| candidate.to_path_buf());
+        let indexed = {
+            let store = self
+                .store
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let exact = store
+                .is_indexed_path(&candidate.to_string_lossy())
+                .map_err(|err| format!("could not check the index for {path}: {err}"))?;
+            if exact {
+                true
+            } else {
+                store
+                    .is_indexed_path(&resolved.to_string_lossy())
+                    .map_err(|err| format!("could not check the index for {path}: {err}"))?
+            }
+        };
+        if indexed {
+            return Ok(resolved);
+        }
+        Err(format!(
+            "Zeidex will not read {path}: it is not inside an indexed folder, was not \
+             chosen in a file dialog, and is not in the index."
+        ))
     }
 
     /// Re-reads the candidate table after a bootstrap or watcher refresh.
@@ -425,6 +494,67 @@ mod tests {
         )
         .expect("state");
         (directory, state)
+    }
+
+    /// The launcher opens what the index found. That must keep working for an
+    /// application entry outside every scan root, and it must not turn into
+    /// "open anything the page names".
+    #[test]
+    fn a_path_is_readable_through_a_root_a_pick_or_the_index() {
+        let (directory, state) = test_state("authorize");
+        let scan = directory.join("scan");
+        std::fs::create_dir_all(&scan).expect("scan root");
+        let inside = scan.join("report.pdf");
+        std::fs::write(&inside, b"pdf").expect("indexed file");
+        let outside = directory.join("outside/secret.txt");
+        std::fs::create_dir_all(directory.join("outside")).expect("outside dir");
+        std::fs::write(&outside, b"secret").expect("outside file");
+
+        state
+            .paths
+            .set_roots(&[scan.to_string_lossy().into_owned()]);
+        assert!(
+            state.authorize_read(&inside.to_string_lossy()).is_ok(),
+            "a file inside a configured root is readable"
+        );
+        assert!(
+            state.authorize_read(&outside.to_string_lossy()).is_err(),
+            "a file beside the root is not"
+        );
+
+        // An application entry lives outside every root; the index is what
+        // makes it openable.
+        let entry = "/usr/share/applications/zeidex-test.desktop";
+        {
+            let mut store = state
+                .store
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            store
+                .upsert_candidates(&[zeidex_indexing::Candidate::new(
+                    "app:zeidex-test",
+                    zeidex_indexing::CandidateKind::App,
+                    "Test",
+                    entry,
+                )])
+                .expect("index the entry");
+        }
+        assert!(state.authorize_read(entry).is_ok());
+
+        // A pick is authority for that path only.
+        state.paths.mint(&outside);
+        assert!(state.authorize_read(&outside.to_string_lossy()).is_ok());
+
+        let refused = state
+            .authorize_read("/etc/shadow")
+            .expect_err("an invented path must be refused");
+        assert!(
+            refused.contains("will not read"),
+            "the refusal must say what happened: {refused}"
+        );
+
+        drop(state);
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

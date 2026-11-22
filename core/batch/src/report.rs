@@ -18,7 +18,7 @@ use rust_xlsxwriter::{
 };
 
 use crate::error::BatchResult;
-use crate::matcher::{BatchEntryResult, BatchMatch, BatchReport, FileKind};
+use crate::matcher::{BatchEntryResult, BatchMatch, BatchReport, BatchStatus, FileKind};
 
 const INK: Color = Color::RGB(0x0F_172A);
 const MUTED: Color = Color::RGB(0x64_748B);
@@ -176,13 +176,14 @@ fn duration_zebra() -> Format {
 }
 
 /// Status text in its own colour, on the row's own background.
-fn status_format(status: &str, on_zebra: bool) -> Format {
+fn status_format(status: BatchStatus, on_zebra: bool) -> Format {
+    // Exhaustive on purpose: a new status must be given a colour here rather
+    // than silently inheriting the muted one.
     let color = match status {
-        "exact" => GOOD,
-        "high" => WARN,
-        "not_found" => BAD,
-        "error" => BAD,
-        _ => MUTED,
+        BatchStatus::Exact => GOOD,
+        BatchStatus::High => WARN,
+        BatchStatus::Possible => MUTED,
+        BatchStatus::NotFound | BatchStatus::Error => BAD,
     };
     let base = if on_zebra { zebra() } else { cell() };
     base.set_bold().set_font_color(color)
@@ -225,15 +226,18 @@ fn write_summary(
     )?;
 
     // The chart reads from this block, so the labels and values live here rather
-    // than being formatted inline into a sentence.
+    // than being formatted inline into a sentence. The four outcome rows sit
+    // together and are mutually exclusive (exact + approximate + not found +
+    // errors = requested), so the chart cannot count a found file twice: "Found"
+    // is the sum of the two match rows and is deliberately not plotted.
     let rows: [(&str, f64, &str); 10] = [
         ("Requested names", summary.total as f64, "#,##0"),
         ("Found", summary.found as f64, "#,##0"),
-        ("Not found", summary.not_found as f64, "#,##0"),
         ("Exact matches", summary.exact as f64, "#,##0"),
         ("Approximate matches", summary.approximate as f64, "#,##0"),
-        ("Multiple-match cases", summary.multiple as f64, "#,##0"),
+        ("Not found", summary.not_found as f64, "#,##0"),
         ("Errors", summary.errors as f64, "#,##0"),
+        ("Multiple-match cases", summary.multiple as f64, "#,##0"),
         ("Success rate", summary.success_percent / 100.0, "0.0%"),
         (
             "Matching threshold",
@@ -272,8 +276,11 @@ fn write_summary(
         &kpi_value().set_align(FormatAlign::Left),
     )?;
 
-    // One series over four contiguous rows: a chart of four outcomes reads at a
-    // glance, while two one-point series would share no category axis at all.
+    // One series over the four outcome rows (exact, approximate, not found,
+    // errors). They are contiguous and mutually exclusive, so the bars add up to
+    // the number of requested names. "Found" is the sum of the first two and is
+    // deliberately outside the range: including it made the chart report more
+    // outcomes than there were requests.
     let mut chart = rust_xlsxwriter::Chart::new(rust_xlsxwriter::ChartType::Column);
     chart.title().set_name("Outcome of the batch");
     chart.set_width(430);
@@ -283,8 +290,8 @@ fn write_summary(
     chart
         .add_series()
         .set_name("Names")
-        .set_values(("Summary", 5, 1, 8, 1))
-        .set_categories(("Summary", 5, 0, 8, 0));
+        .set_values(("Summary", 6, 1, 9, 1))
+        .set_categories(("Summary", 6, 0, 9, 0));
     sheet.insert_chart(3, 3, &chart)?;
 
     // The explanation spans A:C: wrapped inside a 30-character column it would
@@ -389,17 +396,17 @@ fn write_result_row(
         duration()
     };
 
-    sheet.write_string_with_format(row, 0, &entry.requested, &text)?;
+    sheet.write_string_with_format(row, 0, cell_text(&entry.requested), &text)?;
     sheet.write_string_with_format(
         row,
         1,
-        status_label(&entry.status),
-        &status_format(&entry.status, striped),
+        status_label(entry.status),
+        &status_format(entry.status, striped),
     )?;
 
     match matched {
         Some(found) => {
-            sheet.write_string_with_format(row, 2, &found.name, &text)?;
+            sheet.write_string_with_format(row, 2, cell_text(&found.name), &text)?;
             sheet.write_number_with_format(row, 3, f64::from(found.score) / 100.0, &share)?;
             sheet.write_string_with_format(row, 4, found.match_type.label(), &text)?;
             sheet.write_string_with_format(
@@ -414,7 +421,7 @@ fn write_result_row(
                 size_label(found.size_bytes, found.kind),
                 &middle,
             )?;
-            sheet.write_string_with_format(row, 7, &found.path, &text)?;
+            sheet.write_string_with_format(row, 7, cell_text(&found.path), &text)?;
             match found.modified_unix_s.and_then(excel_datetime) {
                 Some(stamp) => {
                     sheet.write_datetime_with_format(row, 8, &stamp, &time)?;
@@ -436,18 +443,18 @@ fn write_result_row(
     Ok(())
 }
 
-fn status_label(status: &str) -> &'static str {
+fn status_label(status: BatchStatus) -> &'static str {
     match status {
-        "exact" => "Exact",
-        "high" => "High confidence",
-        "possible" => "Possible",
-        "error" => "Error",
-        _ => "Not found",
+        BatchStatus::Exact => "Exact",
+        BatchStatus::High => "High confidence",
+        BatchStatus::Possible => "Possible",
+        BatchStatus::NotFound => "Not found",
+        BatchStatus::Error => "Error",
     }
 }
 
 fn note_for(entry: &BatchEntryResult, matched: Option<&BatchMatch>) -> String {
-    if entry.status == "error" {
+    if entry.status == BatchStatus::Error {
         return "No searchable characters: the name is empty after normalization.".to_string();
     }
     if entry.matches.is_empty() {
@@ -495,11 +502,11 @@ fn write_missing(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<(
         // An entry with no searchable characters is not a missing file: it was
         // never searched, and listing it here would send the user looking for a
         // name the index could never have matched.
-        .filter(|entry| entry.matches.is_empty() && entry.status != "error")
+        .filter(|entry| entry.matches.is_empty() && entry.status != BatchStatus::Error)
     {
         let striped = row.is_multiple_of(2);
         let text = if striped { zebra() } else { cell() };
-        sheet.write_string_with_format(row, 0, &entry.requested, &text)?;
+        sheet.write_string_with_format(row, 0, cell_text(&entry.requested), &text)?;
         sheet.write_string_with_format(row, 1, extension_of(&entry.requested), &text)?;
         sheet.write_string_with_format(
             row,
@@ -511,12 +518,18 @@ fn write_missing(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<(
     }
 
     if row == 1 {
-        sheet.write_string_with_format(
-            1,
-            0,
-            "Every requested name was found.",
-            &cell().set_font_color(GOOD),
-        )?;
+        // Error entries are deliberately absent from this sheet, so "nothing
+        // missing" is not the same as "everything was found": a batch whose only
+        // non-matches were unsearchable names used to print the success message.
+        let message = if report.summary.errors > 0 {
+            format!(
+                "No missing files. {} name(s) could not be searched; see the Results sheet.",
+                report.summary.errors
+            )
+        } else {
+            "Every requested name was found.".to_string()
+        };
+        sheet.write_string_with_format(1, 0, message, &cell().set_font_color(GOOD))?;
     } else {
         sheet.autofilter(0, 0, row - 1, 2)?;
     }
@@ -533,7 +546,7 @@ fn write_missing(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<(
 fn write_multiple(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<()> {
     let sheet = workbook.add_worksheet();
     sheet.set_name("Multiple Matches")?;
-    let widths = [34.0, 34.0, 9.0, 14.0, 64.0, 18.0];
+    let widths = [34.0, 34.0, 9.0, 14.0, 64.0, 18.0, 30.0];
     for (column, width) in widths.iter().enumerate() {
         sheet.set_column_width(column as u16, *width)?;
     }
@@ -544,6 +557,7 @@ fn write_multiple(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<
         "Match Type",
         "File Path",
         "Last Modified",
+        "Notes",
     ];
     for (column, label) in headers.iter().enumerate() {
         sheet.write_string_with_format(0, column as u16, *label, &header())?;
@@ -557,7 +571,7 @@ fn write_multiple(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<
         .iter()
         .filter(|entry| entry.total_matches > 1)
     {
-        for found in &entry.matches {
+        for (position, found) in entry.matches.iter().enumerate() {
             let striped = row.is_multiple_of(2);
             let text = if striped { zebra() } else { cell() };
             let share = if striped { percent_zebra() } else { percent() };
@@ -566,11 +580,11 @@ fn write_multiple(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<
             } else {
                 datetime()
             };
-            sheet.write_string_with_format(row, 0, &entry.requested, &text)?;
-            sheet.write_string_with_format(row, 1, &found.name, &text)?;
+            sheet.write_string_with_format(row, 0, cell_text(&entry.requested), &text)?;
+            sheet.write_string_with_format(row, 1, cell_text(&found.name), &text)?;
             sheet.write_number_with_format(row, 2, f64::from(found.score) / 100.0, &share)?;
             sheet.write_string_with_format(row, 3, found.match_type.label(), &text)?;
-            sheet.write_string_with_format(row, 4, &found.path, &text)?;
+            sheet.write_string_with_format(row, 4, cell_text(&found.path), &text)?;
             match found.modified_unix_s.and_then(excel_datetime) {
                 Some(stamp) => {
                     sheet.write_datetime_with_format(row, 5, &stamp, &time)?;
@@ -579,6 +593,25 @@ fn write_multiple(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<
                     sheet.write_string_with_format(row, 5, "—", &text)?;
                 }
             }
+            // The sheet lists the candidates that were kept, not every one that
+            // reached the threshold. Saying so on each row is what stops a
+            // truncated list from reading as the whole answer.
+            // On the first row of each group only, so the note reads as a
+            // caption rather than a repeated column.
+            let note = if position == 0 {
+                if entry.total_matches > entry.matches.len() {
+                    format!(
+                        "{} candidates; showing the best {}.",
+                        entry.total_matches,
+                        entry.matches.len()
+                    )
+                } else {
+                    format!("{} candidates.", entry.total_matches)
+                }
+            } else {
+                String::new()
+            };
+            sheet.write_string_with_format(row, 6, note, &text)?;
             row += 1;
         }
     }
@@ -591,7 +624,7 @@ fn write_multiple(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<
             &cell().set_font_color(GOOD),
         )?;
     } else {
-        sheet.autofilter(0, 0, row - 1, 5)?;
+        sheet.autofilter(0, 0, row - 1, 6)?;
     }
     sheet.set_landscape();
     sheet.set_print_scale(75);
@@ -682,6 +715,39 @@ fn extension_of(requested: &str) -> String {
     }
 }
 
+/// Excel refuses a cell longer than 32 767 UTF-16 units, and the library turns
+/// that into an error that aborts the whole export. A single pasted paragraph
+/// with no line breaks is one entry, so one long request used to cost the entire
+/// report. Truncating keeps the workbook: the visible text still identifies the
+/// request, and the ellipsis says it was cut.
+///
+/// The limit is in UTF-16 units because that is what Excel counts, and a
+/// supplementary-plane character is two of them.
+fn cell_text(value: &str) -> std::borrow::Cow<'_, str> {
+    const MAX_UNITS: usize = 32_767;
+    // One unit is left for the ellipsis, which is one UTF-16 unit.
+    const LIMIT: usize = MAX_UNITS - 1;
+
+    let units: usize = value.encode_utf16().count();
+    if units <= MAX_UNITS {
+        return std::borrow::Cow::Borrowed(value);
+    }
+    let mut used = 0usize;
+    let mut cut = value.len();
+    for (offset, ch) in value.char_indices() {
+        let width = ch.len_utf16();
+        if used + width > LIMIT {
+            cut = offset;
+            break;
+        }
+        used += width;
+    }
+    let mut out = String::with_capacity(cut + 3);
+    out.push_str(&value[..cut]);
+    out.push('…');
+    std::borrow::Cow::Owned(out)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -700,12 +766,12 @@ mod tests {
     fn an_unsearchable_entry_is_labelled_and_explained() {
         let entry = BatchEntryResult {
             requested: "\u{0640}".to_string(),
-            status: "error".to_string(),
+            status: BatchStatus::Error,
             matches: Vec::new(),
             total_matches: 0,
             duration_ms: 1,
         };
-        assert_eq!(status_label(&entry.status), "Error");
+        assert_eq!(status_label(entry.status), "Error");
         assert!(note_for(&entry, None).contains("No searchable characters"));
     }
 
@@ -732,5 +798,29 @@ mod tests {
         assert_eq!(extension_of("report.final.pdf"), "pdf");
         assert_eq!(extension_of("README"), "—");
         assert_eq!(extension_of(".gitignore"), "—");
+    }
+
+    /// Excel rejects a cell over 32 767 UTF-16 units, and the library turns that
+    /// into an error that aborts the whole export. A single pasted paragraph is
+    /// one entry, so one long request used to cost the entire report.
+    #[test]
+    fn a_cell_is_cut_to_the_excel_limit_instead_of_failing_the_export() {
+        let long = "a".repeat(40_000);
+        let cut = cell_text(&long);
+        assert_eq!(cut.encode_utf16().count(), 32_767);
+        assert!(cut.ends_with('…'), "the cut is visible");
+
+        // A supplementary-plane character is two UTF-16 units, so the cut has to
+        // land on a character boundary and stay inside the budget.
+        let wide = "𝕏".repeat(20_000);
+        let cut = cell_text(&wide);
+        assert_eq!(cut.encode_utf16().count(), 32_767);
+        assert!(cut.ends_with('…'));
+        assert!(cut.chars().rev().nth(1).is_some_and(|ch| ch == '𝕏'));
+
+        // Short values are returned untouched, without an allocation.
+        let short = "invoice.pdf";
+        assert!(matches!(cell_text(short), std::borrow::Cow::Borrowed(_)));
+        assert_eq!(cell_text(short), short);
     }
 }

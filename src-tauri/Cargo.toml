@@ -26,7 +26,6 @@ directml = ["zeidex-ocr/directml"]
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
 tauri-plugin-global-shortcut = "2"
 
 # `translate` is the `tr"` mode: the launcher's only network feature, off in

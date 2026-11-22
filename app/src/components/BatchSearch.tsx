@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
 import { api, type BatchEntryResult, type BatchReport, type ParsedList } from "../api";
 import {
   allPaths,
@@ -152,13 +151,11 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
 
   const importList = useCallback(async () => {
     try {
-      const picked = await open({
-        multiple: false,
-        directory: false,
-        filters: [{ name: t("Text list", "قائمة نصية"), extensions: ["txt"] }],
-      });
-      if (!picked || Array.isArray(picked)) return;
-      const next = await api.batchImport(picked);
+      const next = await api.batchImport(
+        t("Import a list of file names", "استيراد قائمة أسماء ملفات"),
+        t("Text list", "قائمة نصية"),
+      );
+      if (!next) return;
       // Going through the textarea keeps one source of truth: the box, the
       // review count and the search all show the same list.
       setText(next.entries.join("\n"));
@@ -194,13 +191,12 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
     if (!report || exporting) return;
     setExporting(true);
     try {
-      const stamp = new Date().toISOString().slice(0, 10);
-      const path = await save({
-        defaultPath: `zeidex-batch-${stamp}.xlsx`,
-        filters: [{ name: t("Excel workbook", "مصنف Excel"), extensions: ["xlsx"] }],
-      });
+      const path = await api.batchExport(
+        report,
+        t("Save the batch report", "حفظ تقرير الدفعة"),
+        t("Excel workbook", "مصنف Excel"),
+      );
       if (!path) return;
-      await api.batchExport(report, path);
       setMessage({ kind: "notice", text: t(`Report saved to ${path}`, `حُفظ التقرير في ${path}`) });
     } catch (err) {
       setMessage({ kind: "error", text: String(err) });
@@ -389,21 +385,32 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
               <div className="mt-2 flex flex-wrap items-center gap-3 text-[0.65rem] text-zinc-500">
                 <span className="text-zinc-300">
                   {t(
-                    `${entries.length.toLocaleString()} names ready`,
-                    `${entries.length.toLocaleString()} اسماً جاهزاً`,
+                    `${entries.length.toLocaleString()} ${entries.length === 1 ? "name" : "names"} ready`,
+                    // A count with a counted noun needs one of four Arabic
+                    // forms; a label and a number is correct for every count
+                    // and is how Arabic interfaces usually show totals.
+                    `الأسماء الجاهزة: ${entries.length.toLocaleString()}`,
                   )}
                 </span>
                 {parsed && parsed.duplicates > 0 && (
                   <span>
-                    {t(`${parsed.duplicates} duplicates folded`, `${parsed.duplicates} مكرراً مدموج`)}
+                    {t(
+                      `${parsed.duplicates} ${parsed.duplicates === 1 ? "duplicate" : "duplicates"} folded`,
+                      `مكررات مدموجة: ${parsed.duplicates}`,
+                    )}
                   </span>
                 )}
                 {parsed && parsed.dropped_empty > 0 && (
-                  <span>{t(`${parsed.dropped_empty} blank lines`, `${parsed.dropped_empty} سطراً فارغاً`)}</span>
+                  <span>
+                    {t(
+                      `${parsed.dropped_empty} blank ${parsed.dropped_empty === 1 ? "line" : "lines"}`,
+                      `أسطر فارغة: ${parsed.dropped_empty}`,
+                    )}
+                  </span>
                 )}
                 {parsed && parsed.overflow > 0 && (
                   <span className="text-amber-300">
-                    {t(`${parsed.overflow} over the limit`, `${parsed.overflow} فوق الحد`)}
+                    {t(`${parsed.overflow} over the limit`, `فوق الحد: ${parsed.overflow}`)}
                   </span>
                 )}
               </div>
@@ -640,8 +647,8 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
               </div>
               <p className="mt-2 text-[0.6rem] leading-relaxed text-zinc-500">
                 {t(
-                  "100% accepts only the same name after case, diacritic and Arabic letter-variant folding. Below that, contains, all-words and up-to-four-typo matches are added.",
-                  "100% لا يقبل إلا الاسم نفسه بعد توحيد حالة الأحرف والتشكيل واختلافات الحروف العربية. أقل من ذلك يُضاف التطابق الجزئي وكل الكلمات وحتى أربعة أخطاء إملائية.",
+                  "100% accepts only the same name — or the same name without its extension — after case, diacritic and Arabic letter-variant folding. Below that, contains, all-words and up-to-four-typo matches are added.",
+                  "100% لا يقبل إلا الاسم نفسه — أو الاسم نفسه بلا امتداده — بعد توحيد حالة الأحرف والتشكيل واختلافات الحروف العربية. أقل من ذلك يُضاف التطابق الجزئي وكل الكلمات وحتى أربعة أخطاء إملائية.",
                 )}
               </p>
               <button

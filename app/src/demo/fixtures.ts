@@ -565,6 +565,7 @@ export const ADVISOR: AdvisorView = {
     reason: "PP-OCRv5 Server matches this advanced machine: 16 logical cores, 16 GB RAM.",
     reason_ar: "PP-OCRv5 الخادم يناسب جهازاً بمستوى متقدم: 16 نواة منطقية و16 غ.ب ذاكرة.",
     downgraded: false,
+    insufficient_memory: false,
     ocr_concurrency: 2,
     batch_chunk: 1_024,
     index_threads: 8,

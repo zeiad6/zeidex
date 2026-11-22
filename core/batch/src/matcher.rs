@@ -26,6 +26,7 @@
 //! band and abandoned as soon as a whole row leaves it, so a hopeless candidate
 //! costs a few cells per character rather than a full matrix.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -77,6 +78,27 @@ pub enum MatchKind {
     Tokens,
     /// Levenshtein similarity.
     Fuzzy,
+}
+
+/// What a request's best candidate amounts to.
+///
+/// A typed enum rather than a string: the report colours and labels rows by
+/// this value, and a mistyped `"posible"` used to fall through to the muted
+/// default instead of failing to compile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchStatus {
+    /// The whole normalized name, or the name without its extension, equals the
+    /// request.
+    Exact,
+    /// A strong but inexact match: 85% or more.
+    High,
+    /// At or above the threshold, below 85%.
+    Possible,
+    /// The search ran and nothing reached the threshold.
+    NotFound,
+    /// The request had no searchable characters, so no score exists for it.
+    Error,
 }
 
 impl MatchKind {
@@ -135,11 +157,14 @@ impl BatchFile {
     pub fn extension(&self) -> Option<&str> {
         match self.kind {
             FileKind::Folder => None,
+            // A single leading dot is part of the name, matching `stem_of`: a
+            // dotfile has no extension, so `.bashrc` is not a file of type
+            // "bashrc".
             FileKind::File => self
                 .name
                 .rsplit_once('.')
-                .map(|(_, extension)| extension)
-                .filter(|extension| !extension.is_empty()),
+                .filter(|(stem, extension)| !stem.is_empty() && !extension.is_empty())
+                .map(|(_, extension)| extension),
         }
     }
 }
@@ -171,9 +196,8 @@ pub struct BatchMatch {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BatchEntryResult {
     pub requested: String,
-    /// `exact`, `high`, `possible`, `not_found`, or `error` when the request
-    /// had no searchable characters.
-    pub status: String,
+    /// Derived from the best candidate, not from the displayed page.
+    pub status: BatchStatus,
     /// Best first, at most the requested limit.
     pub matches: Vec<BatchMatch>,
     /// How many candidates passed the threshold, before the limit.
@@ -271,7 +295,7 @@ pub fn search_with_limit(
         ..BatchSummary::default()
     };
     for entry in &results {
-        if entry.status == "error" {
+        if entry.status == BatchStatus::Error {
             summary.errors += 1;
             continue;
         }
@@ -280,7 +304,7 @@ pub fn search_with_limit(
             continue;
         }
         summary.found += 1;
-        if entry.status == "exact" {
+        if entry.status == BatchStatus::Exact {
             summary.exact += 1;
         } else {
             summary.approximate += 1;
@@ -315,7 +339,7 @@ fn search_one(
     let started = Instant::now();
     let mut result = BatchEntryResult {
         requested: requested.to_string(),
-        status: "not_found".to_string(),
+        status: BatchStatus::NotFound,
         matches: Vec::new(),
         total_matches: 0,
         duration_ms: 0,
@@ -324,33 +348,47 @@ fn search_one(
     match Query::new(requested) {
         Some(query) => {
             let mut found = index.exact(&query, files);
-            if found.is_empty() {
-                found = fuzzy_matches(files, &query, threshold);
-            }
-            result.total_matches = found.len();
+            let (total, best) = if found.is_empty() {
+                if threshold < MAX_THRESHOLD {
+                    // At 100% the fuzzy pass is provably empty: containment and
+                    // fuzzy both cap at 99, so every candidate would be
+                    // rejected. Skipping it turns a full index scan into nothing.
+                    let (best, counted, top) = fuzzy_matches(files, &query, threshold, limit);
+                    found = best;
+                    (counted, top)
+                } else {
+                    (0, None)
+                }
+            } else {
+                (found.len(), Some(100))
+            };
+            // The status follows the best candidate, not the displayed page, so
+            // a display limit of zero cannot turn a found file into a missing
+            // one.
+            result.status = status_of(best);
+            result.total_matches = total;
             found.truncate(limit);
             for entry in &mut found {
                 entry.size_bytes = size_of(&entry.path, entry.kind);
             }
-            result.status = status_of(found.first()).to_string();
             result.matches = found;
         }
         // Nothing survived normalization, so there is nothing to compare. This
         // is reported as an error rather than as "not found": the index was
         // never the reason the name did not match.
-        None => result.status = "error".to_string(),
+        None => result.status = BatchStatus::Error,
     }
 
     result.duration_ms = started.elapsed().as_millis() as u64;
     result
 }
 
-fn status_of(best: Option<&BatchMatch>) -> &'static str {
+fn status_of(best: Option<u8>) -> BatchStatus {
     match best {
-        None => "not_found",
-        Some(found) if found.score >= 100 => "exact",
-        Some(found) if found.score >= 85 => "high",
-        Some(_) => "possible",
+        None => BatchStatus::NotFound,
+        Some(score) if score >= 100 => BatchStatus::Exact,
+        Some(score) if score >= 85 => BatchStatus::High,
+        Some(_) => BatchStatus::Possible,
     }
 }
 
@@ -414,22 +452,79 @@ impl<'a> ExactIndex<'a> {
     }
 }
 
-fn fuzzy_matches(files: &[BatchFile], query: &Query, threshold: u8) -> Vec<BatchMatch> {
-    let mut matches = Vec::new();
+/// The best few matches, the number that reached the threshold, and the top
+/// score.
+///
+/// Only the survivors are materialised. A short request at a low threshold can
+/// match most of a large index, and building a [`BatchMatch`] (three `String`
+/// clones) for every one of them, sorting the lot and then keeping eight was
+/// both a large transient allocation per entry and pure waste. The scan keeps a
+/// bounded, unsorted shortlist and replaces its worst entry instead.
+fn fuzzy_matches(
+    files: &[BatchFile],
+    query: &Query,
+    threshold: u8,
+    limit: usize,
+) -> (Vec<BatchMatch>, usize, Option<u8>) {
     // One buffer for the whole pass: a `Vec<char>` per candidate would mean
     // tens of thousands of allocations per entry.
     let mut scratch = Vec::new();
-    for file in files {
-        if let Some((score, kind)) = best_score(file, query, threshold, &mut scratch) {
-            matches.push(match_from(file, score, kind));
+    let mut kept: Vec<(u8, MatchKind, usize)> = Vec::with_capacity(limit.min(64));
+    let mut total = 0usize;
+    let mut top: Option<u8> = None;
+
+    for (index, file) in files.iter().enumerate() {
+        let Some((score, kind)) = best_score(file, query, threshold, &mut scratch) else {
+            continue;
+        };
+        total += 1;
+        if top.is_none_or(|current| score > current) {
+            top = Some(score);
+        }
+        if limit == 0 {
+            continue;
+        }
+        if kept.len() < limit {
+            kept.push((score, kind, index));
+            continue;
+        }
+        // Replace the weakest kept candidate when this one outranks it. `limit`
+        // is small, so the linear scan is cheaper than a heap.
+        if let Some(position) = kept
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| rank(a, b, files))
+            .map(|(position, _)| position)
+            && rank(&(score, kind, index), &kept[position], files) == std::cmp::Ordering::Greater
+        {
+            kept[position] = (score, kind, index);
         }
     }
-    sort_matches(&mut matches);
-    matches
+
+    kept.sort_by(|a, b| rank(a, b, files).reverse());
+    let matches = kept
+        .into_iter()
+        .map(|(score, kind, index)| match_from(&files[index], score, kind))
+        .collect();
+    (matches, total, top)
+}
+
+/// Orders two candidates the way the results list does: highest score first,
+/// then name, then path. `Greater` means "ranks higher".
+fn rank(a: &(u8, MatchKind, usize), b: &(u8, MatchKind, usize), files: &[BatchFile]) -> Ordering {
+    let (left, right) = (&files[a.2], &files[b.2]);
+    a.0.cmp(&b.0)
+        .then_with(|| right.name.to_lowercase().cmp(&left.name.to_lowercase()))
+        .then_with(|| right.path.cmp(&left.path))
 }
 
 /// The best score this file can offer for the request, or `None` when nothing
 /// reaches the threshold.
+///
+/// The threshold only prunes the expensive pass; the score itself does not
+/// depend on it. That matters because the number shown next to a result has to
+/// be the file's own score: when the comparison was filtered by the threshold,
+/// the same file reported 85 at an 80% threshold and 90 at an 86% one.
 fn best_score(
     file: &BatchFile,
     query: &Query,
@@ -438,32 +533,41 @@ fn best_score(
 ) -> Option<(u8, MatchKind)> {
     let mut best: Option<(u8, MatchKind)> = None;
 
-    for (text, len) in [
+    // A folder's stem is its name, so the second pass would repeat the first.
+    let mut texts: [(&str, usize); 2] = [
         (&file.normalized_name, file.name_len),
         (&file.normalized_stem, file.stem_len),
-    ] {
+    ];
+    let passes = if file.normalized_stem == file.normalized_name {
+        texts[1] = texts[0];
+        1
+    } else {
+        2
+    };
+
+    for (text, len) in texts.into_iter().take(passes) {
         if let Some(score) = containment_score(&query.text, text) {
-            improve(&mut best, score, MatchKind::Containment, threshold);
+            improve(&mut best, score, MatchKind::Containment);
         }
         if query.tokens.len() > 1 && all_tokens_present(text, &query.tokens) {
-            improve(&mut best, TOKEN_SCORE, MatchKind::Tokens, threshold);
+            improve(&mut best, TOKEN_SCORE, MatchKind::Tokens);
         }
-        // A containment or token score of 85 or more is already "high
-        // confidence"; the edit distance could only confirm it, at a real cost
-        // per candidate.
-        if best.is_none_or(|(current, _)| current < 85)
+        // Nothing can beat 99, and the edit distance is the costly pass, so it
+        // is skipped once the answer cannot improve.
+        if best.is_none_or(|(current, _)| current < 99)
             && let Some(score) = fuzzy_score(query, text, len, threshold, scratch)
         {
-            improve(&mut best, score, MatchKind::Fuzzy, threshold);
+            improve(&mut best, score, MatchKind::Fuzzy);
         }
     }
 
-    best
+    best.filter(|(score, _)| *score >= threshold)
 }
 
-/// Keeps the highest score that reaches the threshold.
-fn improve(best: &mut Option<(u8, MatchKind)>, score: u8, kind: MatchKind, threshold: u8) {
-    if score >= threshold && best.is_none_or(|(current, _)| score > current) {
+/// Keeps the highest score seen. The threshold is applied by the caller, so the
+/// score a file reports is its own and not a function of the slider.
+fn improve(best: &mut Option<(u8, MatchKind)>, score: u8, kind: MatchKind) {
+    if best.is_none_or(|(current, _)| score > current) {
         *best = Some((score, kind));
     }
 }
@@ -525,7 +629,12 @@ fn fuzzy_score(
 /// `max_len`, capped at [`MAX_EDITS`]. At 100% that is zero: only equality.
 fn max_distance(max_len: usize, threshold: u8) -> usize {
     let slack = usize::from(MAX_THRESHOLD - threshold.clamp(MIN_THRESHOLD, MAX_THRESHOLD));
-    ((max_len * slack) / 100).min(MAX_EDITS)
+    // The score is `round(100 * (1 - d / max_len))`, so the budget has to round
+    // the same way. Floor division dropped a distance whose rounded score still
+    // equals the threshold: one edit in eleven characters is 91%, but at a 91%
+    // threshold the floor rule allowed zero edits and the match was never
+    // scored.
+    ((max_len * slack + max_len / 2) / 100).min(MAX_EDITS)
 }
 
 fn match_from(file: &BatchFile, score: u8, match_type: MatchKind) -> BatchMatch {
@@ -542,11 +651,16 @@ fn match_from(file: &BatchFile, score: u8, match_type: MatchKind) -> BatchMatch 
 }
 
 fn sort_matches(matches: &mut [BatchMatch]) {
-    matches.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-            .then_with(|| a.path.cmp(&b.path))
+    // `sort_by_cached_key` lowercases each name once instead of twice per
+    // comparison. The lists are short, but this runs for every request in the
+    // batch and the comparator was the only per-comparison allocation left in
+    // the matcher.
+    matches.sort_by_cached_key(|entry| {
+        (
+            std::cmp::Reverse(entry.score),
+            entry.name.to_lowercase(),
+            entry.path.clone(),
+        )
     });
 }
 
@@ -559,18 +673,32 @@ fn tokens_of(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether every request token appears as a whole token in `text`. Compares
-/// slices of the already-normalized text, so no allocation per candidate.
+/// Whether every request token appears as a whole token in `text`.
+///
+/// The count is over *request* tokens that have been seen, not over candidate
+/// tokens that matched: counting occurrences let a file named `alpha-alpha.pdf`
+/// satisfy the request `alpha beta`, because one repeated token supplied both
+/// hits. Comparisons are slices of the already-normalized text, so there is no
+/// allocation per candidate.
 fn all_tokens_present(text: &str, tokens: &[String]) -> bool {
+    // A request has a handful of words, so a bitmask covers it without
+    // allocating; a pathological request falls back to the general path.
+    let mut seen = 0u64;
     let mut found = 0usize;
     for token in text.split(|ch: char| !ch.is_alphanumeric()) {
         if token.is_empty() {
             continue;
         }
-        if tokens.iter().any(|wanted| wanted == token) {
-            found += 1;
-            if found == tokens.len() {
-                return true;
+        for (index, wanted) in tokens.iter().enumerate() {
+            if wanted == token && seen & (1 << index) == 0 {
+                seen |= 1 << index;
+                found += 1;
+                if found == tokens.len() {
+                    return true;
+                }
+                // A token may satisfy several identical request words, but
+                // duplicates are already collapsed by `Query`, so one is enough.
+                break;
             }
         }
     }
@@ -692,7 +820,7 @@ mod tests {
             70,
         );
         let found = entry(&report, "invoice.pdf");
-        assert_eq!(found.status, "exact");
+        assert_eq!(found.status, BatchStatus::Exact);
         assert_eq!(found.matches.len(), 1);
         assert_eq!(found.matches[0].name, "invoice.pdf");
         assert_eq!(found.matches[0].match_type, MatchKind::Exact);
@@ -702,7 +830,7 @@ mod tests {
     fn a_name_without_its_extension_finds_the_file() {
         let report = search(&files(&["report.pdf"]), &["report".to_string()], 70);
         let found = entry(&report, "report");
-        assert_eq!(found.status, "exact");
+        assert_eq!(found.status, BatchStatus::Exact);
         assert_eq!(found.matches[0].match_type, MatchKind::Stem);
     }
 
@@ -714,7 +842,7 @@ mod tests {
             70,
         );
         let found = entry(&report, "invoice");
-        assert_eq!(found.status, "high");
+        assert_eq!(found.status, BatchStatus::High);
         assert_eq!(found.matches[0].match_type, MatchKind::Containment);
         assert!(found.matches[0].score >= 70 && found.matches[0].score < 100);
     }
@@ -750,8 +878,8 @@ mod tests {
         let request = "quartely-reports.pdf".to_string();
         let strict = search(&candidates, std::slice::from_ref(&request), 95);
         let loose = search(&candidates, std::slice::from_ref(&request), 60);
-        assert_eq!(entry(&strict, &request).status, "not_found");
-        assert_ne!(entry(&loose, &request).status, "not_found");
+        assert_eq!(entry(&strict, &request).status, BatchStatus::NotFound);
+        assert_ne!(entry(&loose, &request).status, BatchStatus::NotFound);
     }
 
     #[test]
@@ -759,11 +887,122 @@ mod tests {
         let candidates = files(&["invoice-2024.pdf"]);
         let partial = "invoice".to_string();
         let report = search(&candidates, std::slice::from_ref(&partial), 100);
-        assert_eq!(entry(&report, &partial).status, "not_found");
+        assert_eq!(entry(&report, &partial).status, BatchStatus::NotFound);
 
         let exact = "Invoice-2024.PDF".to_string();
         let report = search(&candidates, std::slice::from_ref(&exact), 100);
-        assert_eq!(entry(&report, &exact).status, "exact");
+        assert_eq!(entry(&report, &exact).status, BatchStatus::Exact);
+    }
+
+    /// A repeated candidate token must not stand in for two different request
+    /// words. `alpha-alpha-2024.pdf` used to report 85% / Tokens for the request
+    /// `alpha beta`, although `beta` appears nowhere in the name.
+    #[test]
+    fn a_repeated_candidate_word_does_not_satisfy_two_request_words() {
+        let candidates = files(&["alpha-alpha-2024.pdf"]);
+        let request = "alpha beta".to_string();
+        let report = search(&candidates, std::slice::from_ref(&request), 85);
+        let found = entry(&report, &request);
+        assert_ne!(
+            found.status,
+            BatchStatus::High,
+            "a repeated token must not pass as two words: {found:?}"
+        );
+        assert!(
+            found
+                .matches
+                .iter()
+                .all(|hit| hit.match_type != MatchKind::Tokens),
+            "no token match may be claimed: {found:?}"
+        );
+    }
+
+    /// A request whose words are genuinely all present still matches.
+    #[test]
+    fn every_request_word_present_is_still_a_token_match() {
+        let candidates = files(&["alpha-beta-2024.pdf"]);
+        let request = "alpha beta".to_string();
+        let report = search(&candidates, std::slice::from_ref(&request), 85);
+        let found = entry(&report, &request);
+        assert_eq!(found.status, BatchStatus::High);
+        assert_eq!(found.matches[0].match_type, MatchKind::Tokens);
+    }
+
+    /// The edit budget has to round like the score does. One substitution in an
+    /// eleven-character name is 91%; at a 91% threshold the floor-based budget
+    /// allowed zero edits, so the match was silently dropped.
+    #[test]
+    fn a_score_equal_to_the_threshold_is_not_dropped() {
+        let candidates = files(&["invoice.pdf"]);
+        let request = "invoicf.pdf".to_string();
+        for threshold in [90, 91] {
+            let report = search(&candidates, std::slice::from_ref(&request), threshold);
+            let found = entry(&report, &request);
+            assert_ne!(
+                found.status,
+                BatchStatus::NotFound,
+                "the match scores 91 and must survive a {threshold}% threshold: {found:?}"
+            );
+            assert_eq!(found.matches[0].score, 91);
+        }
+    }
+
+    /// The number shown next to a result is the file's own score. Filtering the
+    /// comparison by the threshold made the same file report 85 at an 80%
+    /// threshold and 90 at an 86% one.
+    #[test]
+    fn a_reported_score_does_not_depend_on_the_threshold() {
+        let candidates = files(&["alpha-beta.pdf"]);
+        let request = "alpha beta".to_string();
+        let mut scores = Vec::new();
+        for threshold in [50, 70, 80, 85, 86, 90] {
+            let report = search(&candidates, std::slice::from_ref(&request), threshold);
+            let found = entry(&report, &request);
+            if found.status != BatchStatus::NotFound {
+                scores.push(found.matches[0].score);
+            }
+        }
+        assert!(!scores.is_empty(), "the file matches at the loose end");
+        assert!(
+            scores.windows(2).all(|pair| pair[0] == pair[1]),
+            "one file, one score, whatever the slider says: {scores:?}"
+        );
+    }
+
+    /// A display limit is a display concern: it must not turn a found file into
+    /// a missing one, and the total must still be reported.
+    #[test]
+    fn a_zero_display_limit_still_reports_the_file_as_found() {
+        let candidates = files(&["report.pdf"]);
+        let request = "report.pdf".to_string();
+        let report = search_with_limit(&candidates, std::slice::from_ref(&request), 70, 0);
+        let found = entry(&report, &request);
+        assert_eq!(found.status, BatchStatus::Exact);
+        assert_eq!(found.total_matches, 1);
+        assert!(found.matches.is_empty());
+    }
+
+    /// The shortlist is bounded, so a broad request over a large index cannot
+    /// materialise a match for every file.
+    #[test]
+    fn only_the_display_limit_is_materialised() {
+        let names: Vec<String> = (0..500).map(|i| format!("report-{i:03}.pdf")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let candidates = files(&refs);
+        let request = "report".to_string();
+        let report = search_with_limit(&candidates, std::slice::from_ref(&request), 60, 3);
+        let found = entry(&report, &request);
+        assert_eq!(found.matches.len(), 3, "the display limit is honoured");
+        assert_eq!(found.total_matches, 500, "the total is still counted");
+    }
+
+    /// A dotfile has no extension, and the stem, the extension and the report
+    /// have to agree about it.
+    #[test]
+    fn a_dotfile_has_no_extension() {
+        let candidates = files(&[".bashrc"]);
+        assert_eq!(candidates[0].stem, ".bashrc");
+        assert_eq!(candidates[0].extension(), None);
     }
 
     #[test]
@@ -782,7 +1021,7 @@ mod tests {
         // Typed with ha instead of ta marbuta, and without the hamza.
         let report = search(&candidates, &["مدرسه-الاطفال".to_string()], 90);
         let found = entry(&report, "مدرسه-الاطفال");
-        assert_ne!(found.status, "not_found");
+        assert_ne!(found.status, BatchStatus::NotFound);
         assert_eq!(found.matches[0].name, "مدرسة-الأطفال.pdf");
     }
 
@@ -790,7 +1029,7 @@ mod tests {
     fn arabic_indic_digits_match_ascii_ones() {
         let candidates = files(&["تقرير-٢٠٢٦.pdf"]);
         let report = search(&candidates, &["تقرير-2026.pdf".to_string()], 90);
-        assert_eq!(entry(&report, "تقرير-2026.pdf").status, "exact");
+        assert_eq!(entry(&report, "تقرير-2026.pdf").status, BatchStatus::Exact);
     }
 
     #[test]
@@ -843,7 +1082,10 @@ mod tests {
             &["\u{0640}\u{0640}".to_string(), "a.pdf".to_string()],
             50,
         );
-        assert_eq!(entry(&report, "\u{0640}\u{0640}").status, "error");
+        assert_eq!(
+            entry(&report, "\u{0640}\u{0640}").status,
+            BatchStatus::Error
+        );
         assert!(entry(&report, "\u{0640}\u{0640}").matches.is_empty());
         assert_eq!(report.summary.errors, 1);
         assert_eq!(report.summary.not_found, 0);
@@ -857,7 +1099,7 @@ mod tests {
         // miss against the index; the parser drops such lines, and a direct
         // caller gets the same answer.
         let report = search(&files(&["a.pdf"]), &["   ".to_string()], 50);
-        assert_eq!(entry(&report, "   ").status, "error");
+        assert_eq!(entry(&report, "   ").status, BatchStatus::Error);
         assert_eq!(report.summary.errors, 1);
         assert!(entry(&report, "   ").matches.is_empty());
     }

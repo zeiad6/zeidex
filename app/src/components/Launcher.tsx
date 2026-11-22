@@ -224,7 +224,10 @@ export default function Launcher({
 
   const visible = results.filter((result) => {
     if (tab === "apps") return result.kind === "app";
-    if (tab === "files") return result.kind === "file" || result.kind === "folder";
+    if (tab === "files")
+      return (
+        result.kind === "file" || result.kind === "folder" || result.kind === "document"
+      );
     return true;
   });
 
@@ -559,7 +562,9 @@ export default function Launcher({
                     : countLabel("results", visible.length, rtl)}
           </span>
           {busy ? (
-            <span className="text-zinc-600">{rtl ? "يفهرس…" : "Indexing…"}</span>
+            <span className="text-zinc-600">
+              {indexStatus?.paused ? (rtl ? "متوقفة مؤقتاً" : "Indexing paused") : rtl ? "يفهرس…" : "Indexing…"}
+            </span>
           ) : (
             count !== null && (
               <span className="text-zinc-600">

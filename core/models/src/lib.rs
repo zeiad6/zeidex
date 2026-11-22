@@ -19,6 +19,6 @@ pub use device::{
     Criterion, DeviceClass, DeviceProfile, Recommendation, classify, criteria, recommend, score,
 };
 pub use install::{
-    ACTIVE, InstallState, Manifest, PackStatus, active_pack, clear_active, hash_file,
-    installed_bytes, prepare_file, promote, remove, set_active, status, verify,
+    ACTIVE, InstallState, Manifest, PackStatus, active_pack, clear_active, disk_requirement_mb,
+    hash_file, installed_bytes, prepare_file, promote, recover, remove, set_active, status, verify,
 };

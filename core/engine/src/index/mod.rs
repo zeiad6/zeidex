@@ -7,9 +7,10 @@ mod settings;
 pub(crate) use files::{candidate_for_path, compile_ignored_matchers, walk_children};
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
-use zeidex_indexing::{Candidate, CandidateIdKind};
+use zeidex_indexing::{Candidate, CandidateIdKind, IndexControl};
 
 const INDEX_CHANNEL_CAPACITY: usize = 2048;
 
@@ -34,18 +35,48 @@ pub fn discover_candidates_stream_scoped(
     config: &RuntimeConfig,
     scope: BootstrapScope,
 ) -> CandidateDiscoveryStream {
+    discover_candidates_stream_controlled(config, scope, None)
+}
+
+/// The same stream, with a shared switch the caller can pause or cancel. The
+/// switch is checked by the file walker between directory entries and by the
+/// apps/settings discovery between sources, so a stop is seen within one entry
+/// rather than at the end of the walk.
+pub fn discover_candidates_stream_controlled(
+    config: &RuntimeConfig,
+    scope: BootstrapScope,
+    control: Option<Arc<IndexControl>>,
+) -> CandidateDiscoveryStream {
     let (tx, rx) = mpsc::sync_channel(INDEX_CHANNEL_CAPACITY);
     let config = config.clone();
     let producer_handle = thread::spawn(move || {
         let files_handle = if scope.files {
             let files_config = config.clone();
             let files_tx = tx.clone();
+            let files_control = control.clone();
             Some(thread::spawn(move || {
-                files::discover_local_files_and_folders(&files_config, files_tx);
+                files::discover_local_files_and_folders(
+                    &files_config,
+                    files_tx,
+                    files_control.as_deref(),
+                );
             }))
         } else {
             None
         };
+
+        if control
+            .as_deref()
+            .is_some_and(|control| !control.checkpoint())
+        {
+            drop(tx);
+            if let Some(handle) = files_handle
+                && let Err(err) = handle.join()
+            {
+                eprintln!("zeidex index: file worker panicked: {err:?}");
+            }
+            return;
+        }
 
         if scope.apps {
             apps::discover_installed_apps(&config, tx.clone());

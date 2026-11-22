@@ -16,7 +16,8 @@ use std::thread;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use zeidex_engine::config::RuntimeConfig;
-use zeidex_engine::{BootstrapScope, QueryEngine};
+use zeidex_engine::{BootstrapOutcome, BootstrapScope, QueryEngine};
+use zeidex_indexing::{IndexControl, IndexRun};
 
 use crate::index_watch::WatchHandle;
 use crate::state::AppState;
@@ -25,6 +26,10 @@ use crate::state::AppState;
 #[derive(Clone, Debug, Serialize)]
 pub struct IndexStatus {
     pub indexing: bool,
+    /// True while the running walk is parked on the user's request. The UI uses
+    /// it to show Resume instead of Pause, and the footer to say why the count
+    /// stopped moving.
+    pub paused: bool,
     pub count: usize,
     pub error: Option<String>,
 }
@@ -53,6 +58,20 @@ pub(crate) enum Request {
     },
 }
 
+/// Flags the worker and the command layer share. Grouped so the worker takes
+/// one argument instead of five that always travel together.
+#[derive(Clone)]
+struct WorkerShared {
+    built: Arc<AtomicBool>,
+    full_pending: Arc<AtomicBool>,
+    rerun: Arc<AtomicBool>,
+    /// True only between the start and the end of a full walk. A pause or a
+    /// cancel asked while nothing is walking must report "no walk", not flip a
+    /// switch that would park the next one.
+    walking: Arc<AtomicBool>,
+    control: Arc<IndexControl>,
+}
+
 /// A clonable handle to the worker. Cloning shares the same channel and flags.
 #[derive(Clone)]
 pub struct IndexService {
@@ -69,6 +88,10 @@ pub struct IndexService {
     /// runs again when it finishes, because a settings save during a walk
     /// changed the config that walk had already read.
     rerun: Arc<AtomicBool>,
+    /// The pause/cancel switch shared with the walker and its writer.
+    control: Arc<IndexControl>,
+    /// True while a full walk is actually running (see `WorkerShared`).
+    walking: Arc<AtomicBool>,
 }
 
 impl IndexService {
@@ -80,22 +103,21 @@ impl IndexService {
         ));
         let full_pending = Arc::new(AtomicBool::new(false));
         let rerun = Arc::new(AtomicBool::new(false));
+        let control = IndexControl::shared();
+        let walking = Arc::new(AtomicBool::new(false));
 
         let worker_tx = tx.clone();
-        let worker_built = built.clone();
-        let worker_pending = full_pending.clone();
-        let worker_rerun = rerun.clone();
+        let shared = WorkerShared {
+            built: built.clone(),
+            full_pending: full_pending.clone(),
+            rerun: rerun.clone(),
+            walking: walking.clone(),
+            control: control.clone(),
+        };
         if let Err(err) = thread::Builder::new()
             .name("zeidex-index".to_string())
             .spawn(move || {
-                run_worker(
-                    app,
-                    rx,
-                    worker_tx,
-                    worker_built,
-                    worker_pending,
-                    worker_rerun,
-                );
+                run_worker(app, rx, worker_tx, shared);
             })
         {
             // The launcher still works from the rows already in the database;
@@ -109,6 +131,8 @@ impl IndexService {
             lazy,
             full_pending,
             rerun,
+            control,
+            walking,
         }
     }
 
@@ -137,6 +161,37 @@ impl IndexService {
         self.lazy.store(lazy, Ordering::Release);
         self.built.store(false, Ordering::Release);
         self.request_full();
+    }
+
+    /// Park the running walk after its current entry. Returns whether a walk
+    /// was actually running, so the UI can say "already paused" instead of
+    /// pretending the click did something.
+    pub fn pause(&self) -> bool {
+        self.walking.load(Ordering::Acquire) && self.control.pause()
+    }
+
+    pub fn resume(&self) -> bool {
+        self.control.resume()
+    }
+
+    /// Stop the walk. The database writer skips its stale-row sweep, so the
+    /// index keeps every row the walk did not reach.
+    pub fn cancel(&self) -> bool {
+        if !self.walking.load(Ordering::Acquire) {
+            return false;
+        }
+        // A cancel must not be immediately followed by the queued rerun: that
+        // would restart the walk the user just stopped.
+        self.rerun.store(false, Ordering::Release);
+        self.control.cancel()
+    }
+
+    /// The live switch state. `None` means no walk is running, which is not the
+    /// same as "running": a UI that mounts while idle must not offer a pause.
+    pub fn control_state(&self) -> Option<IndexRun> {
+        self.walking
+            .load(Ordering::Acquire)
+            .then(|| self.control.state())
     }
 
     fn request_full(&self) {
@@ -192,10 +247,15 @@ fn run_worker(
     app: AppHandle,
     rx: Receiver<Request>,
     request_tx: Sender<Request>,
-    built: Arc<AtomicBool>,
-    full_pending: Arc<AtomicBool>,
-    rerun: Arc<AtomicBool>,
+    shared: WorkerShared,
 ) {
+    let WorkerShared {
+        built,
+        full_pending,
+        rerun,
+        walking,
+        control,
+    } = shared;
     let mut watch: Option<WatchHandle> = None;
     // Why live updates are off or partial, if they are. Kept for the life of
     // the worker and repeated in every status so a warning cannot be missed by
@@ -205,10 +265,15 @@ fn run_worker(
     while let Ok(request) = rx.recv() {
         match request {
             Request::Full { reply } => {
+                // A fresh run: whatever the previous run was told (paused or
+                // cancelled) no longer applies.
+                control.reset();
+                walking.store(true, Ordering::Release);
                 emit(
                     &app,
                     IndexStatus {
                         indexing: true,
+                        paused: false,
                         count: current_count(&app),
                         error: status_error(watch_warning.as_deref(), None),
                     },
@@ -226,21 +291,47 @@ fn run_worker(
                 watch_warning = started.warning;
                 watch_generation = started.generation;
                 let db_path = db_path(&app);
-                let result = QueryEngine::bootstrap_sqlite(&db_path);
+                let result = QueryEngine::bootstrap_sqlite_controlled(
+                    &db_path,
+                    BootstrapScope::ALL,
+                    &control,
+                );
                 match result {
-                    Ok(()) => {
+                    Ok(BootstrapOutcome::Complete { .. }) => {
                         built.store(true, Ordering::Release);
                         let count = reload_count(&app);
                         emit(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                paused: false,
                                 count,
                                 error: status_error(watch_warning.as_deref(), None),
                             },
                         );
                         if let Some(reply) = reply {
                             let _ = reply.send(Ok(count));
+                        }
+                    }
+                    Ok(BootstrapOutcome::Cancelled { discovered }) => {
+                        // Not an error: the user asked to stop. The rows already
+                        // written stay, and the rows not reached are still in
+                        // the database, so `built` is unchanged and the count is
+                        // whatever is really there.
+                        let count = reload_count(&app);
+                        emit(
+                            &app,
+                            IndexStatus {
+                                indexing: false,
+                                paused: false,
+                                count,
+                                error: status_error(watch_warning.as_deref(), None),
+                            },
+                        );
+                        if let Some(reply) = reply {
+                            let _ = reply.send(Err(format!(
+                                "cancelled after {discovered} items; the index keeps what it had"
+                            )));
                         }
                     }
                     Err(err) => {
@@ -251,6 +342,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                paused: false,
                                 count: current_count(&app),
                                 error: status_error(
                                     watch_warning.as_deref(),
@@ -263,6 +355,7 @@ fn run_worker(
                         }
                     }
                 }
+                walking.store(false, Ordering::Release);
                 if finish_full(&full_pending, &rerun)
                     && request_tx.send(Request::Full { reply: None }).is_err()
                 {
@@ -280,6 +373,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                paused: false,
                                 count,
                                 error: status_error(watch_warning.as_deref(), None),
                             },
@@ -292,6 +386,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                paused: false,
                                 count: current_count(&app),
                                 error: status_error(watch_warning.as_deref(), Some(message)),
                             },
@@ -312,6 +407,7 @@ fn run_worker(
                                 &app,
                                 IndexStatus {
                                     indexing: false,
+                                    paused: false,
                                     count,
                                     error: status_error(watch_warning.as_deref(), None),
                                 },
@@ -325,6 +421,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                paused: false,
                                 count: current_count(&app),
                                 error: status_error(watch_warning.as_deref(), Some(message)),
                             },
@@ -350,6 +447,7 @@ fn run_worker(
                         &app,
                         IndexStatus {
                             indexing: false,
+                            paused: control.state() == IndexRun::Paused,
                             count: current_count(&app),
                             error: status_error(watch_warning.as_deref(), None),
                         },

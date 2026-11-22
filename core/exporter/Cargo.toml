@@ -8,11 +8,15 @@ authors.workspace = true
 version = "0.1.0"
 
 [dependencies]
-docx-rs = "0.4.22"
+# Published 0.4.22 pins zip 8, which carries eight RustSec advisories fixed in
+# 9.0.5 (all in `extract`, which this crate does not call, but a vulnerable
+# archive reader should not ship). This is the upstream commit that moved to
+# zip 9; pinned by revision so the build is reproducible.
+docx-rs = { git = "https://github.com/bokuweb/docx-rs", rev = "3b959fa73e6ea78a3c96ab50416407b2c3b8fa7a" }
 zeidex-ocr = { path = "../ocr_engine" }
 rust_xlsxwriter = "0.103"
 thiserror = "2"
-zip = "8"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"

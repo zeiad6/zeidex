@@ -23,7 +23,9 @@ fn zip_entry(path: &Path, name: &str) -> String {
 fn zip_names(path: &Path) -> Vec<String> {
     let file = std::fs::File::open(path).expect("open package");
     let zip = zip::ZipArchive::new(file).expect("open zip");
-    zip.file_names().map(str::to_string).collect()
+    zip.file_names()
+        .map(|name| name.expect("entry name").into_owned())
+        .collect()
 }
 
 /// One batch with every outcome the report has a sheet for.
@@ -239,6 +241,49 @@ fn a_report_survives_a_path_with_spaces_and_unicode() {
     let path = dir.path().join("تقرير الدفعة 2026.xlsx");
     export_report(&report(), &meta(), &path).expect("export");
     assert!(path.exists());
+}
+
+/// Excel refuses a cell over 32 767 UTF-16 units, and the library reports that
+/// as an error that aborts the export. A pasted paragraph with no line breaks is
+/// a single entry, so one long request used to cost the whole workbook: no file,
+/// no warning, and a cryptic `MaxStringLengthExceeded`.
+#[test]
+fn one_enormous_request_does_not_cost_the_whole_report() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("long.xlsx");
+    let huge = "ط".repeat(40_000);
+    let entries = [huge, "missing-notes.docx".to_string()];
+    let report = search(&[], &entries, 70);
+    export_report(&report, &meta(), &path).expect("a long request must not abort the export");
+    assert!(path.exists());
+
+    // The workbook is complete, not merely present.
+    let workbook = zip_entry(&path, "xl/workbook.xml");
+    for sheet in ["Summary", "Results", "Missing", "Multiple Matches"] {
+        assert!(workbook.contains(&format!("name=\"{sheet}\"")), "{sheet}");
+    }
+}
+
+/// The chart's four bars are the mutually exclusive outcomes. `Found` is the sum
+/// of the two match rows, so plotting it alongside them made the chart report
+/// more outcomes than there were requests.
+#[test]
+fn the_chart_plots_only_mutually_exclusive_outcomes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("chart.xlsx");
+    export_report(&report(), &meta(), &path).expect("export");
+
+    let chart = zip_entry(&path, "xl/charts/chart1.xml");
+    // Rows 6..9 (zero-based) are Exact, Approximate, Not found and Errors: the
+    // four outcomes that partition the batch.
+    assert!(
+        chart.contains("<c:f>Summary!$B$7:$B$10</c:f>"),
+        "chart values must cover the outcome rows: {chart}"
+    );
+    assert!(
+        chart.contains("<c:f>Summary!$A$7:$A$10</c:f>"),
+        "chart categories must cover the outcome rows: {chart}"
+    );
 }
 
 /// Not a timing assertion: this only proves a batch far larger than a person

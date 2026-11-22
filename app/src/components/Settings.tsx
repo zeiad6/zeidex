@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { api, type AppSettings, type ModelsStatus } from "../api";
+import { api, type AppSettings, type DocumentIndexStatus, type ModelsStatus } from "../api";
 import type { IndexStatus } from "../index-status";
 import {
   diff,
@@ -10,6 +9,7 @@ import {
   type FieldError,
 } from "../settings-draft";
 import { BrandMark } from "./Brand";
+import type { ThemeChoice } from "../theme";
 import { Icon, type IconName } from "./Icons";
 
 interface Notice {
@@ -55,7 +55,7 @@ function Toggle({
           checked ? "justify-end bg-accent-500/80" : "justify-start bg-ink-700"
         }`}
       >
-        <span className="block h-4 w-4 rounded-full bg-white shadow-sm" />
+        <span className="block h-4 w-4 rounded-full bg-[#fff] shadow-sm" />
       </span>
       <span className="min-w-0">
         <span className="block text-[0.82rem] font-medium text-zinc-100">{title}</span>
@@ -148,11 +148,15 @@ export default function Settings({
   rtl,
   indexStatus,
   onSetRtl,
+  theme,
+  onSetTheme,
   onBack,
 }: {
   rtl: boolean;
   indexStatus: IndexStatus | null;
   onSetRtl: (next: boolean) => void;
+  theme: ThemeChoice;
+  onSetTheme: (next: ThemeChoice) => void;
   onBack: () => void;
 }) {
   const t = (en: string, ar: string) => (rtl ? ar : en);
@@ -163,6 +167,10 @@ export default function Settings({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [indexing, setIndexing] = useState(false);
+  // The button's own request and the worker's status are both "busy"; the
+  // pause controls belong to the worker's walk, not to this component's flag.
+  const busy = indexing || (indexStatus?.indexing ?? false);
+  const paused = indexStatus?.paused ?? false;
   // The worker is the source of truth for the count; a watcher refresh or a
   // settings-triggered rebuild updates this panel without a reload. The ref is
   // what stops a slower `settingsSnapshot` from writing an older count over a
@@ -178,6 +186,7 @@ export default function Settings({
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [models, setModels] = useState<ModelsStatus | null>(null);
+  const [docIndex, setDocIndex] = useState<DocumentIndexStatus | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -202,6 +211,14 @@ export default function Settings({
       })
       .catch(() => {
         // Models are optional for the launcher; About simply omits the line.
+      });
+    api
+      .documentIndexStatus()
+      .then((status) => {
+        if (active) setDocIndex(status);
+      })
+      .catch(() => {
+        // The panel omits the row rather than showing a count it cannot trust.
       });
     return () => {
       active = false;
@@ -294,10 +311,95 @@ export default function Settings({
         message: t(`Indexed ${total} items.`, `اكتملت فهرسة ${total} عنصراً.`),
       });
     } catch (err) {
-      setNotice({ kind: "error", message: String(err) });
+      const message = String(err);
+      // Cancelling is a choice, not a failure: the backend reports how far it
+      // got, and the index kept every row it had.
+      setNotice(
+        message.startsWith("cancelled")
+          ? { kind: "warning", message }
+          : { kind: "error", message },
+      );
     } finally {
       setIndexing(false);
     }
+  };
+
+  const pauseIndex = async () => {
+    const paused = await api.indexPause();
+    setNotice(
+      paused
+        ? {
+            kind: "warning",
+            message: t(
+              "Indexing paused. It resumes from the same entry.",
+              "توقفت الفهرسة مؤقتاً. تستأنف من الموضع نفسه.",
+            ),
+          }
+        : {
+            kind: "warning",
+            message: t("No walk is running to pause.", "لا توجد فهرسة جارية لإيقافها."),
+          },
+    );
+  };
+
+  const resumeIndex = async () => {
+    const resumed = await api.indexResume();
+    setNotice({
+      kind: "warning",
+      message: resumed
+        ? t("Indexing resumed.", "استُئنفت الفهرسة.")
+        : t("The walk is not paused.", "الفهرسة ليست متوقفة مؤقتاً."),
+    });
+  };
+
+  const toggleDocumentIndexing = async (next: boolean) => {
+    try {
+      const enabled = await api.documentSetIndexing(next);
+      setDocIndex((current) => ({ enabled, count: current?.count ?? 0 }));
+      setNotice({
+        kind: "done",
+        message: enabled
+          ? t(
+              "Recognized text will be searchable.",
+              "سيصبح النص المتعرَّف عليه قابلاً للبحث.",
+            )
+          : t(
+              "Recognized text will no longer be stored.",
+              "لن يُخزَّن النص المتعرَّف عليه بعد الآن.",
+            ),
+      });
+    } catch (err) {
+      setNotice({ kind: "error", message: String(err) });
+    }
+  };
+
+  const clearDocumentText = async () => {
+    try {
+      const removed = await api.documentTextClear();
+      setDocIndex((current) => ({ enabled: current?.enabled ?? true, count: 0 }));
+      setNotice({
+        kind: "done",
+        message: t(
+          `Removed the stored text of ${removed} documents. Your files are untouched.`,
+          `حُذف النص المخزَّن لـ ${removed} مستنداً. ملفاتك لم تُمس.`,
+        ),
+      });
+    } catch (err) {
+      setNotice({ kind: "error", message: String(err) });
+    }
+  };
+
+  const cancelIndex = async () => {
+    const cancelled = await api.indexCancel();
+    setNotice({
+      kind: "warning",
+      message: cancelled
+        ? t(
+            "Stopping the walk. Everything already indexed stays.",
+            "جارٍ إيقاف الفهرسة. كل ما فُهرس يبقى محفوظاً.",
+          )
+        : t("No walk is running to stop.", "لا توجد فهرسة جارية لإيقافها."),
+    });
   };
 
   const togglePause = async () => {
@@ -335,8 +437,12 @@ export default function Settings({
   const addRoot = async () => {
     if (!draft) return;
     try {
-      const selected = await open({ directory: true, multiple: false });
-      if (typeof selected !== "string") return;
+      // The dialog runs in Rust: the folder becomes readable because the user
+      // chose it there, not because the page named it.
+      const selected = await api.settingsPickFolder(
+        t("Add a folder to index", "أضف مجلداً للفهرسة"),
+      );
+      if (!selected) return;
       if (draft.fileScanExtraRoots.includes(selected)) return;
       update("fileScanExtraRoots", [...draft.fileScanExtraRoots, selected]);
     } catch {
@@ -502,18 +608,36 @@ export default function Settings({
                 <button
                   type="button"
                   onClick={() => void reindex()}
-                  disabled={indexing || (indexStatus?.indexing ?? false)}
+                  disabled={busy}
                   className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-accent-400 to-iris-400 px-3.5 py-1.5 text-xs font-semibold text-ink-950 shadow-[0_8px_24px_-10px_rgb(34_211_238/0.8)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <Icon
-                    name="refresh"
-                    size={13}
-                    className={indexing || (indexStatus?.indexing ?? false) ? "animate-spin" : ""}
-                  />
-                  {indexing || (indexStatus?.indexing ?? false)
-                    ? t("Reindexing…", "يفهرس…")
+                  <Icon name="refresh" size={13} className={busy && !paused ? "animate-spin" : ""} />
+                  {busy
+                    ? paused
+                      ? t("Paused", "متوقفة")
+                      : t("Reindexing…", "يفهرس…")
                     : t("Reindex now", "إعادة الفهرسة الآن")}
                 </button>
+                {busy && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void (paused ? resumeIndex() : pauseIndex())}
+                      className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-accent-400/30 hover:bg-accent-400/10 hover:text-accent-200"
+                    >
+                      <Icon name={paused ? "play" : "pause"} size={13} />
+                      {paused ? t("Resume", "استئناف") : t("Pause", "إيقاف مؤقت")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void cancelIndex()}
+                      className="flex items-center gap-1.5 rounded-full border border-rose-400/20 bg-rose-400/[0.06] px-3 py-1.5 text-xs font-medium text-rose-200 transition hover:border-rose-400/40 hover:bg-rose-400/10"
+                    >
+                      <Icon name="x" size={13} />
+                      {t("Cancel", "إلغاء")}
+                    </button>
+                  </>
+                )}
                 <span className="text-[0.72rem] text-zinc-500">
                   {t(
                     `${settings.candidateCount.toLocaleString()} items indexed`,
@@ -528,6 +652,37 @@ export default function Settings({
                 >
                   <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
                   <span className="min-w-0 break-words">{indexStatus.error}</span>
+                </div>
+              )}
+
+              {docIndex && (
+                <div className="space-y-2 border-t border-white/[0.06] pt-4">
+                  <Toggle
+                    checked={docIndex.enabled}
+                    onChange={(next) => void toggleDocumentIndexing(next)}
+                    title={t("Index recognized text", "فهرسة النص المتعرَّف عليه")}
+                    hint={t(
+                      "Store the text OCR extracts so a file can be found by a phrase inside it. It stays on this device.",
+                      "خزّن النص الذي يستخرجه OCR ليمكن العثور على الملف بعبارة داخله. يبقى على هذا الجهاز.",
+                    )}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[0.72rem] text-zinc-500">
+                      {t(
+                        `${docIndex.count.toLocaleString()} documents searchable by content`,
+                        `${docIndex.count.toLocaleString()} مستنداً قابلاً للبحث بالمحتوى`,
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void clearDocumentText()}
+                      disabled={docIndex.count === 0}
+                      className="ms-auto flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-rose-400/30 hover:bg-rose-400/10 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Icon name="trash" size={13} />
+                      {t("Clear indexed text", "مسح النص المفهرس")}
+                    </button>
+                  </div>
                 </div>
               )}
             </Card>
@@ -676,7 +831,48 @@ export default function Settings({
 
       case "appearance":
         return (
-          <div className="animate-rise">
+          <div className="animate-rise space-y-4">
+            <SectionHeading
+              icon="sun"
+              title={t("Theme", "السمة")}
+              description={t(
+                "Dark is the product's own surface. Light keeps the same layout and type on paper-white. System follows the operating system and keeps following it while the window is open.",
+                "الداكنة هي سمة المنتج الأساسية. الفاتحة تحافظ على التخطيط والخط نفسهين على سطح ورقي. النظام يتبع نظام التشغيل ويستمر في متابعته أثناء فتح النافذة.",
+              )}
+            />
+            <Card>
+              <div
+                className="grid grid-cols-3 gap-2"
+                role="group"
+                aria-label={t("Theme", "السمة")}
+              >
+                {([
+                  { value: "dark" as const, label: "Dark", labelAr: "داكنة" },
+                  { value: "light" as const, label: "Light", labelAr: "فاتحة" },
+                  { value: "system" as const, label: "System", labelAr: "النظام" },
+                ]).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => onSetTheme(option.value)}
+                    aria-pressed={theme === option.value}
+                    className={`rounded-xl border px-3 py-3 text-sm transition ${
+                      theme === option.value
+                        ? "border-accent-400/30 bg-accent-400/10 text-accent-100"
+                        : "border-white/10 bg-white/[0.02] text-zinc-300 hover:border-white/20 hover:bg-white/[0.05]"
+                    }`}
+                  >
+                    {rtl ? option.labelAr : option.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[0.72rem] leading-relaxed text-zinc-500">
+                {t(
+                  "The choice is remembered on this device. Nothing about it leaves the machine.",
+                  "يُحفظ الاختيار على هذا الجهاز، ولا يغادره شيء منه.",
+                )}
+              </p>
+            </Card>
             <SectionHeading
               icon="eye"
               title={t("Direction", "اتجاه الواجهة")}

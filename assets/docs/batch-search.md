@@ -26,7 +26,8 @@ Three doors, one list:
 - **Paste** into the box — one name per line, a column copied from Excel, a
   tab-separated row, names lifted from an email.
 - **Import TXT** — a `.txt` file, capped at 8 MiB. A larger file is refused by
-  name rather than read into memory.
+  name rather than read into memory. The picker is opened by the backend, not by
+  the page, so the webview never names the file it reads.
 - **Type** — the parsed list is editable: remove an entry, clear the list, paste
   again on top of what is there.
 
@@ -118,7 +119,7 @@ index is a "possible match", which is not a result. A threshold outside
 | 65–79 | Balanced (default 70) | containment, tokens, typos that keep the name recognisable |
 | 80–89 | High confidence | strong containment, all-words, one or two edits |
 | 90–99 | Very strict | near-equal names, prefix containment of a long request |
-| 100 | Exact only | equality after normalization |
+| 100 | Same name, with or without its extension | equality after normalization (name or stem) |
 
 ### Arabic, and everything else normalization touches
 
@@ -190,8 +191,13 @@ anyone sums. The chart is a single series over four contiguous rows — two
 one-point series render as nothing in some viewers.
 
 The report is generated off the UI thread (`#[tauri::command(async)]`), so a
-large export does not freeze the window, and the save path comes from the native
-save dialog rather than a guessed location.
+large export does not freeze the window. The backend opens the save dialog
+itself and takes only a suggested name from the page, so the webview never names
+the file it writes; the workbook is written to a `.part` sibling and renamed into
+place, so a failed export cannot truncate the file that was already there. A
+report sent back from the page is checked against the same ceilings the search
+enforces (2 000 rows, 256 matches per row, threshold and score at most 100)
+before anything is written.
 
 ## Performance
 

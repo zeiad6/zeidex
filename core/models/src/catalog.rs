@@ -48,6 +48,27 @@ pub struct PackFile {
     pub sha256: &'static str,
     pub bytes: u64,
     pub format: FileFormat,
+    /// Digest of the file that actually lands in the pack folder, when the
+    /// installer derives it instead of copying the download.
+    ///
+    /// The v5 Arabic dictionary is extracted from the model's `inference.yml`,
+    /// so `sha256` describes the YAML and cannot verify what the engine reads.
+    /// The extraction is deterministic, so its result is pinned here: without
+    /// this the one file that is never published upstream was also the one file
+    /// nothing checked.
+    pub installed_sha256: Option<&'static str>,
+    /// Size of that derived file, for the status screen and the resume check.
+    pub installed_bytes: u64,
+}
+
+impl PackFile {
+    /// The digest and size of the file as it sits in the pack folder.
+    pub fn installed(&self) -> (&'static str, u64) {
+        match self.installed_sha256 {
+            Some(digest) => (digest, self.installed_bytes),
+            None => (self.sha256, self.bytes),
+        }
+    }
 }
 
 /// Quality/speed tier. The tiers follow the published PP-OCR mobile/server
@@ -155,6 +176,8 @@ const COMPACT_FILES: &[PackFile] = &[
         sha256: "69ce850fec741a2a4568c7c924bb025c9d4f1129e5f96ab428c799ccc5ef2275",
         bytes: 4_729_474,
         format: FileFormat::Raw,
+        installed_sha256: None,
+        installed_bytes: 0,
     },
     PackFile {
         role: FileRole::RecEn,
@@ -163,6 +186,8 @@ const COMPACT_FILES: &[PackFile] = &[
         sha256: "02672d591fee561a95a2491bd5504d66c812b145d1043026c5658ecc165c7e85",
         bytes: 7_652_836,
         format: FileFormat::Raw,
+        installed_sha256: None,
+        installed_bytes: 0,
     },
     PackFile {
         role: FileRole::RecAr,
@@ -171,6 +196,8 @@ const COMPACT_FILES: &[PackFile] = &[
         sha256: "95c13ea1be830623b8dc506728df0d0218f7c436123ff18b2a5c90254991e788",
         bytes: 7_684_783,
         format: FileFormat::Raw,
+        installed_sha256: None,
+        installed_bytes: 0,
     },
     PackFile {
         role: FileRole::DictEn,
@@ -179,6 +206,8 @@ const COMPACT_FILES: &[PackFile] = &[
         sha256: "f27a6aa993c9cb67a588e7ea9aea90bb96b8e51dec6ce98bd7e76c104c1829fe",
         bytes: 285,
         format: FileFormat::Raw,
+        installed_sha256: None,
+        installed_bytes: 0,
     },
     PackFile {
         role: FileRole::DictAr,
@@ -187,6 +216,8 @@ const COMPACT_FILES: &[PackFile] = &[
         sha256: "c071bb21fa36f4ee25d1f1aeec6fcc6a2d222b9ab49248329ec606fdaeef901a",
         bytes: 566,
         format: FileFormat::Raw,
+        installed_sha256: None,
+        installed_bytes: 0,
     },
 ];
 
@@ -223,6 +254,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "56b61e50bd94bbe6a414fc7d187f670e4e3c7b40a0c339d371ea0b392bc1fb84",
                 bytes: 113_350_183,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
             PackFile {
                 role: FileRole::RecEn,
@@ -231,6 +264,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "02672d591fee561a95a2491bd5504d66c812b145d1043026c5658ecc165c7e85",
                 bytes: 7_652_836,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
             PackFile {
                 role: FileRole::RecAr,
@@ -239,6 +274,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "95c13ea1be830623b8dc506728df0d0218f7c436123ff18b2a5c90254991e788",
                 bytes: 7_684_783,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
             PackFile {
                 role: FileRole::DictEn,
@@ -247,6 +284,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "f27a6aa993c9cb67a588e7ea9aea90bb96b8e51dec6ce98bd7e76c104c1829fe",
                 bytes: 285,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
             PackFile {
                 role: FileRole::DictAr,
@@ -255,6 +294,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "c071bb21fa36f4ee25d1f1aeec6fcc6a2d222b9ab49248329ec606fdaeef901a",
                 bytes: 566,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
         ],
         rec_ar_visual: false,
@@ -278,6 +319,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "0f8846b1d4bba223a2a2f9d9b44022fbc22cc019051a602b41a7fda9667e4cad",
                 bytes: 88_118_768,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
             PackFile {
                 role: FileRole::RecEn,
@@ -286,6 +329,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "e09385400eaaaef34ceff54aeb7c4f0f1fe014c27fa8b9905d4709b65746562a",
                 bytes: 84_577_022,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
             PackFile {
                 role: FileRole::RecAr,
@@ -294,6 +339,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "916385d36898954780b807e3ae0370622b4d608f7f0fae364302cbc65b7b073f",
                 bytes: 8_025_038,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
             PackFile {
                 role: FileRole::DictEn,
@@ -302,6 +349,8 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b",
                 bytes: 74_012,
                 format: FileFormat::Raw,
+                installed_sha256: None,
+                installed_bytes: 0,
             },
             PackFile {
                 role: FileRole::DictAr,
@@ -310,6 +359,12 @@ pub const PACKS: &[ModelPack] = &[
                 sha256: "21368419e6c016c31db55d316d59e11c128e1913e6e6fe10287084710043d3a6",
                 bytes: 6_165,
                 format: FileFormat::CharacterDictYaml,
+                // The extracted list, measured from the pinned YAML above:
+                // 747 characters, one per line, 2369 bytes.
+                installed_sha256: Some(
+                    "7f92f7dbb9b75a4787a83bfb4f6d14a8ab515525130c9d40a9036f61cf6999e9",
+                ),
+                installed_bytes: 2_369,
             },
         ],
         rec_ar_visual: true,

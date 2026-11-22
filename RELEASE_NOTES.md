@@ -14,6 +14,7 @@
   <img alt="No account" src="https://img.shields.io/badge/account-not%20required-2f855a?style=flat-square">
   <img alt="No telemetry" src="https://img.shields.io/badge/telemetry-none-2f855a?style=flat-square">
   <img alt="Offline OCR" src="https://img.shields.io/badge/OCR-100%25%20local-2f855a?style=flat-square">
+  <img alt="OCR tiers" src="https://img.shields.io/badge/models-3%20tiers-2d3748?style=flat-square">
   <img alt="Licence" src="https://img.shields.io/badge/licence-GPL--3.0--or--later-2d3748?style=flat-square">
 </p>
 
@@ -22,29 +23,49 @@
 ## The first public release
 
 Zeidex Studio started as a personal launcher and grew into a document studio. This
-release is the first one that packages both halves as a single, self-contained
-desktop app: **no account, no telemetry, and no network calls at runtime** — the
-OCR models, dictionaries, ONNX Runtime and the PDF rasteriser all ship inside the
-installer.
+release packages both halves as a single, self-contained desktop app: **no account,
+no telemetry, and no network calls at runtime** — the OCR models, dictionaries,
+ONNX Runtime and the PDF rasteriser all ship inside the installer. Three OCR tiers,
+a hardware advisor and batch file search are part of the same build.
 
 ### Highlights
 
 | | |
 | --- | --- |
-| **Launch anything** | Fuzzy search across installed applications, files and folders, with keyboard-first navigation and a compact, always-ready window. The index updates itself while the app runs — new, renamed and deleted files appear without a manual rebuild. |
+| **Launch anything** | Fuzzy search across installed applications, files and folders, with keyboard-first navigation and a compact, always-ready window. The index updates itself while the app runs — new, renamed and deleted files appear without a manual rebuild, and indexing can be paused, resumed or cancelled from Settings. |
 | **Clipboard history** | Searchable clipboard buffer with pinning, so the snippet you copied an hour ago is still one keystroke away. |
 | **Inline answers** | Calculator, unit and currency-style expressions, and translation right in the search field — no browser tab required. |
-| **Document Studio** | Drop a scan or a PDF, detect the layout, read the text with PP-OCRv4 (a long PDF can be read as a page window), edit the result, then export to Word or Excel. |
+| **Document Studio** | Drop a scan or a PDF, detect the layout, read the text, edit the result, then export to Word or Excel. A long PDF is read as a page window, and a run can be cancelled between pages. |
+| **Three OCR tiers** | The bundled PP-OCRv4 Mobile model is ready on first launch; a balanced PP-OCRv4 Server pack and a high-accuracy PP-OCRv5 Server pack are one click away, downloaded on demand, checksum-verified and activated atomically. |
+| **Hardware advisor** | Measures CPU, cores, RAM, GPU (where the platform exposes it without a driver query), free disk space and OS, classifies the machine as Basic, Standard, Advanced or High Performance against published criteria, and recommends a tier with the reason and the trade-offs stated. |
+| **Batch file search** | Paste a list or import a `.txt`, review the parsed entries, pick a match threshold anywhere from 50% to 100%, then work through exact, high-confidence, possible, multiple and missing results — open, reveal, or copy paths. |
+| **Excel report** | A four-sheet workbook: an executive summary with KPI block and chart, the full result table with filters and frozen panes, the missing files, and every multiple-match candidate with its score. |
+| **Search inside documents** | Recognised text is indexed locally, so a launcher search finds a word inside a scanned PDF, not just its filename. `.docx`, `.xlsx`, `.odt` and plain text are read directly without an OCR pass. |
+| **Reads Office and text files** | A legacy Windows-1256 or Windows-1252 text file is decoded instead of refused, and spreadsheet dates, percentages and times are rendered the way Excel shows them. |
 | **Real Office files** | `.docx` with RTL `bidi` runs and native tables (including merged cells); `.xlsx` with a right-to-left sheet, numeric cells and merged ranges. |
 | **Private by construction** | ONNX inference runs on your CPU, locally. Nothing is uploaded, and there is no analytics endpoint to disable. |
+
+### OCR model tiers
+
+| Tier | Model | Download | Best for |
+| --- | --- | --- | --- |
+| **Compact** | PP-OCRv4 Mobile | bundled | Low-end and CPU-only machines, quick extraction, first run with no network. |
+| **Balanced** | PP-OCRv4 Server detection | ≈ 129 MB | Most users: sharper line detection on scans and screenshots at a moderate cost. |
+| **Precision** | PP-OCRv5 Server | ≈ 181 MB | Difficult scans, dense Arabic pages and noisy images on a machine with headroom. |
+
+Packs are written to the app data directory, never over the bundled model, and a
+pack is only marked installed once every file matches its SHA-256. Activation is a
+switch, so a failed download cannot leave OCR unusable — the previous tier keeps
+working until the new one verifies.
 
 ### What is inside the installer
 
 - The Tauri desktop shell and the React interface (RTL and Arabic UI included).
 - PP-OCRv4 detection and English/Arabic recognition models, plus their dictionaries.
 - ONNX Runtime and PDFium, staged next to the binary and loaded locally.
-- Roughly **34 MB of models** and **32 MB of runtime libraries**, so the first run
-  works on a machine that has never seen the internet.
+- Roughly **35 MB of models** and **32 MB of runtime libraries**, so the first run
+  works on a machine that has never seen the internet. The two larger tiers are
+  deliberately not bundled; they are downloaded when chosen.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/zeiad6/zeidex/main/assets/screenshots/launcher-search.png" alt="Launcher search results" width="47%">
@@ -61,10 +82,12 @@ installer.
 | **Windows 10/11 (x64)** | `Zeidex.Studio_0.1.0_x64-setup.exe` | 43 MB | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
 | **Linux (x86_64)** | `Zeidex.Studio_0.1.0_amd64.deb` | 52 MB | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
 | **Linux (x86_64)** | `Zeidex.Studio_0.1.0_amd64.AppImage` | 125 MB | Any distribution; no installation, no root. |
+| **Linux (arm64)** | `Zeidex.Studio_0.1.0_arm64.deb` | 52 MB | Raspberry Pi 4/5 and ARM laptops on Debian 12+ or Ubuntu 22.04+. |
 
-> Builds are produced on GitHub's native runners from the tagged source, so every
-> artifact matches the commit behind this release. macOS bundles are not part of
-> this workflow yet — see [Build from source](#build-from-source).
+> The x64 packages are produced on GitHub's native runners from the tagged source,
+> so every artifact matches the commit behind this release. The arm64 package is
+> built and startup-tested on aarch64 Linux. macOS bundles are not part of this
+> workflow yet — see [Build from source](#build-from-source).
 
 ### Install
 
@@ -80,10 +103,16 @@ msiexec /i "Zeidex.Studio_0.1.0_x64_en-US.msi"
 "Zeidex.Studio_0.1.0_x64-setup.exe"
 ```
 
-**Debian / Ubuntu**
+**Debian / Ubuntu (x86_64)**
 
 ```bash
 sudo apt install ./Zeidex.Studio_0.1.0_amd64.deb
+```
+
+**Debian / Ubuntu (arm64)**
+
+```bash
+sudo apt install ./Zeidex.Studio_0.1.0_arm64.deb
 ```
 
 **AppImage**
@@ -107,7 +136,12 @@ that do not ship WebKitGTK 4.1, use the AppImage.
    the arrow keys to move through results.
 3. Open **Studio** to drop a scan or PDF, run detection and recognition, edit the
    recognised text, and export to `.docx` or `.xlsx`.
-4. Set `ZEIDEX_MODELS_DIR` only if you want the models stored somewhere other than
+4. Open **Models** to see the three tiers and install a larger one; open
+   **Advisor** to have the machine measured and a tier recommended. Neither is
+   required — the bundled model works offline out of the box.
+5. Open **Batch** to search for a list of filenames at once and export the result
+   as an Excel report.
+6. Set `ZEIDEX_MODELS_DIR` only if you want the models stored somewhere other than
    the bundled location.
 
 Configuration lives in `~/.zeidex` (Linux/macOS) or `%APPDATA%\zeidex` (Windows).
@@ -116,15 +150,15 @@ Configuration lives in `~/.zeidex` (Linux/macOS) or `%APPDATA%\zeidex` (Windows)
 
 ## Verification
 
-Every asset is built from the tag `v0.1.0`. SHA-256 checksums are attached to this
-release as `SHA256SUMS`; verify a download before installing:
+Every x64 asset is built from the tag `v0.1.0`. SHA-256 checksums are attached to
+this release as `SHA256SUMS`; verify a download before installing:
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
 ```powershell
-Get-FileHash "Zeidex Studio_0.1.0_x64_en-US.msi" -Algorithm SHA256
+Get-FileHash "Zeidex.Studio_0.1.0_x64_en-US.msi" -Algorithm SHA256
 ```
 
 ---
@@ -132,11 +166,18 @@ Get-FileHash "Zeidex Studio_0.1.0_x64_en-US.msi" -Algorithm SHA256
 ## Known limitations
 
 - **Arabic recognition** is usable but not perfect: dense lines can lose
-  characters and Arabic-Indic digits are not read reliably yet. The
-  [PP-OCRv5 Arabic](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx)
-  candidate was measured: it is notably better on clean letterforms once its
-  visual-order output is converted, but digit runs and mixed Latin text stay
-  weak, so it is not the default without a labelled corpus of real scans.
+  characters and Arabic-Indic digits are not read reliably yet. The Precision
+  tier uses
+  [PP-OCRv5 Arabic](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx),
+  which reads clean letterforms noticeably better once its visual-order output is
+  converted, but digit runs and mixed Latin text stay weak. It is an optional
+  download rather than the default because it has not been measured against a
+  labelled corpus of real scans.
+- **`.doc` and `.ppt` are refused, not read** — both are binary OLE formats whose
+  text lives in compressed streams. `.docx`, `.xlsx`, `.odt` and legacy encoded
+  text are supported.
+- **Spreadsheet formulas are not evaluated** — a formula cell shows the cached
+  result the file stores, which is what Excel last calculated.
 - **No auto-update** in this release; download a newer installer when one is
   published.
 - **macOS** builds are not produced by this workflow. The shell compiles on macOS

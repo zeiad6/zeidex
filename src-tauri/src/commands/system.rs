@@ -15,18 +15,23 @@ use crate::state::AppState;
 // thread - `Command::spawn` and a connection waiting on the write lock can both
 // block - so every command here runs on the async runtime.
 
-/// Opens a file or folder with the platform handler. `path` comes from an
-/// indexed candidate, so it is a path the walker already vetted; a failure is
-/// reported to the UI rather than unwrapped.
+/// Opens a file or folder with the platform handler.
+///
+/// The path is checked first: a search result is an index row and a dropped or
+/// picked file is a capability, but a path the page invented is neither, and
+/// handing it to the desktop's opener would start whatever it names. A failure
+/// is reported to the UI rather than unwrapped.
 #[tauri::command(async)]
-pub fn open_target(path: String) -> Result<(), String> {
-    open_path(&path).map_err(|err| err.to_string())
+pub fn open_target(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let path = state.authorize_read(&path)?;
+    open_path(&path.to_string_lossy()).map_err(|err| err.to_string())
 }
 
 /// Reveals a file in its container (Explorer / Finder / file manager).
 #[tauri::command(async)]
-pub fn reveal_target(path: String) -> Result<(), String> {
-    reveal_path(&path).map_err(|err| err.to_string())
+pub fn reveal_target(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let path = state.authorize_read(&path)?;
+    reveal_path(&path.to_string_lossy()).map_err(|err| err.to_string())
 }
 
 /// Opens a URL with the platform handler (default browser). The shell only

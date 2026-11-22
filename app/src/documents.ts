@@ -14,7 +14,50 @@ export const SUPPORTED_DOCUMENT_EXTENSIONS = [
   "bmp",
   "webp",
   "pdf",
+  "docx",
+  "xlsx",
+  "odt",
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "tsv",
+  "log",
 ] as const;
+
+/**
+ * Formats that already hold text, so the Studio extracts instead of runs OCR.
+ * Kept beside the list above because the dialog filter and the run button must
+ * agree: a format the dialog offers but the button cannot read is a dead end.
+ */
+export const TEXT_DOCUMENT_EXTENSIONS = [
+  "docx",
+  "xlsx",
+  "odt",
+  "txt",
+  "md",
+  "markdown",
+  "csv",
+  "tsv",
+  "log",
+] as const;
+
+export function isTextDocument(path: string): boolean {
+  const extension = documentExtension(path);
+  return (
+    extension !== null &&
+    (TEXT_DOCUMENT_EXTENSIONS as readonly string[]).includes(extension)
+  );
+}
+
+/** The `source` label the content index stores for a text document. */
+export function textDocumentSource(path: string): "docx" | "xlsx" | "odt" | "text" {
+  const extension = documentExtension(path);
+  if (extension === "docx") return "docx";
+  if (extension === "xlsx") return "xlsx";
+  if (extension === "odt") return "odt";
+  return "text";
+}
 
 /**
  * The extension of the last path segment, lowercased, or `null`.

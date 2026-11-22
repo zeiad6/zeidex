@@ -7,6 +7,12 @@ use zeidex_indexing::{Candidate, CandidateKind};
 
 mod secrets;
 
+mod documents;
+pub use documents::{
+    DocumentHit, DocumentText, MAX_DOCUMENT_BODY_CHARS, MAX_DOCUMENT_ROWS, PrunedDocuments,
+    document_tokens,
+};
+
 const SEARCH_ENGINE_DUCKDUCKGO: &str = "duckduckgo";
 const SEARCH_ENGINE_GOOGLE: &str = "google";
 const SEARCH_ENGINE_BING: &str = "bing";
@@ -515,6 +521,42 @@ impl SqliteStore {
         }
 
         Ok(out)
+    }
+
+    /// A counter that changes whenever this connection modifies any row.
+    ///
+    /// Batch Search rebuilds its matcher input from this table, which costs a
+    /// query plus several strings and a normalisation per row. It caches the
+    /// result and reuses it while this number is unchanged. The counter comes
+    /// from SQLite rather than from a hand-maintained list of "methods that must
+    /// bump it": a missed bump would serve stale results, which is far worse than
+    /// a wasted rebuild.
+    ///
+    /// It is deliberately coarse — a clipboard write also bumps it — so the cache
+    /// can only ever be rebuilt more often than necessary, never less. Changes
+    /// made by another process are not counted, which is fine for an app that
+    /// opens the database once.
+    pub fn data_version(&self) -> u64 {
+        self.conn.total_changes()
+    }
+
+    /// Whether `path` is a row the index already knows.
+    ///
+    /// The shell uses this as a capability check: opening a search result is
+    /// safe because the row exists, and an application entry outside every scan
+    /// root is still a row the walker wrote. `idx_candidates_path` makes it a
+    /// point lookup instead of a scan over the whole index.
+    ///
+    /// It answers "did we write this row", not "does the file exist": a row
+    /// whose file was deleted still answers yes, because opening it must fail
+    /// with the OS error the user can act on, not with a capability error.
+    pub fn is_indexed_path(&self, path: &str) -> StorageResult<bool> {
+        let found: i64 = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM candidates WHERE path = ?1)",
+            [path],
+            |row| row.get(0),
+        )?;
+        Ok(found != 0)
     }
 
     /// Every indexed file and folder, in the narrow shape Batch Search needs.
@@ -1282,6 +1324,9 @@ impl SqliteStore {
 
              CREATE INDEX IF NOT EXISTS idx_candidates_title ON candidates(title);
              CREATE INDEX IF NOT EXISTS idx_candidates_kind ON candidates(kind);
+             -- The shell asks whether a path is indexed on every open, so the
+             -- lookup must not scan the table.
+             CREATE INDEX IF NOT EXISTS idx_candidates_path ON candidates(path);
 
              CREATE TABLE IF NOT EXISTS usage_events (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1328,6 +1373,8 @@ impl SqliteStore {
               CREATE INDEX IF NOT EXISTS idx_clipboard_copied_at
                   ON clipboard_entries(copied_at_unix_s);",
         )?;
+
+        documents::migrate_document_text(&self.conn)?;
 
         ensure_column_exists(&self.conn, "candidates", "indexed_at_unix_s", "INTEGER")?;
         self.conn.execute(
@@ -2181,6 +2228,79 @@ mod tests {
             .expect("update candidate icon");
         let after = store.load_candidates(None).expect("reload candidates");
         assert_eq!(after[0].icon.as_deref(), Some("/tmp/fav2/github.com.png"));
+    }
+
+    #[test]
+    fn an_indexed_path_is_recognised_and_an_unrelated_one_is_not() {
+        let mut store = SqliteStore::open_in_memory().expect("open sqlite in memory");
+        let file = Candidate {
+            id: "file:/home/u/report.pdf".into(),
+            kind: CandidateKind::File,
+            title: "report.pdf".into(),
+            path: "/home/u/report.pdf".into(),
+            ..Default::default()
+        };
+        let arabic = Candidate {
+            id: "file:/home/u/تقرير.pdf".into(),
+            kind: CandidateKind::File,
+            title: "تقرير.pdf".into(),
+            path: "/home/u/تقرير.pdf".into(),
+            ..Default::default()
+        };
+        store
+            .upsert_candidates(&[file, arabic])
+            .expect("insert candidates");
+
+        assert!(
+            store
+                .is_indexed_path("/home/u/report.pdf")
+                .expect("query indexed path")
+        );
+        assert!(
+            store
+                .is_indexed_path("/home/u/تقرير.pdf")
+                .expect("query arabic path")
+        );
+        // A prefix or a sibling is a different path, not a loose match.
+        assert!(
+            !store
+                .is_indexed_path("/home/u/report.pd")
+                .expect("query prefix")
+        );
+        assert!(
+            !store
+                .is_indexed_path("/home/u/report.pdf.bak")
+                .expect("query suffix")
+        );
+        assert!(
+            !store
+                .is_indexed_path("/etc/shadow")
+                .expect("query unindexed")
+        );
+        // Case matters: the capability is about the exact path we wrote.
+        assert!(
+            !store
+                .is_indexed_path("/home/u/Report.pdf")
+                .expect("query other case")
+        );
+        // An empty path must not match a row with an empty path either.
+        assert!(!store.is_indexed_path("").expect("query empty"));
+    }
+
+    #[test]
+    fn a_row_whose_file_was_deleted_still_counts_as_indexed() {
+        // The capability answers "did the walker write this row", not "does the
+        // file exist". A deleted file must reach the OS and fail with a message
+        // the user understands, not be refused as if the path were foreign.
+        let mut store = SqliteStore::open_in_memory().expect("open sqlite in memory");
+        store
+            .upsert_candidates(&[candidate("app:gone", "Gone", "/nonexistent/dir/Gone.app")])
+            .expect("insert candidate");
+        assert!(
+            store
+                .is_indexed_path("/nonexistent/dir/Gone.app")
+                .expect("query deleted path")
+        );
     }
 
     #[test]
