@@ -78,10 +78,10 @@ working until the new one verifies.
 
 | Platform | Package | Size | Best for |
 | --- | --- | --- | --- |
-| **Windows 10/11 (x64)** | `Zeidex.Studio_0.1.0_x64_en-US.msi` | 47 MB | Standard installer, per-machine or per-user, WiX-based. |
-| **Windows 10/11 (x64)** | `Zeidex.Studio_0.1.0_x64-setup.exe` | 43 MB | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
-| **Linux (x86_64)** | `Zeidex.Studio_0.1.0_amd64.deb` | 52 MB | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
-| **Linux (x86_64)** | `Zeidex.Studio_0.1.0_amd64.AppImage` | 125 MB | Any distribution; no installation, no root. |
+| **Windows 10/11 (x64)** | `Zeidex.Studio_0.1.0_x64_en-US.msi` | 48 MB | Standard installer, per-machine or per-user, WiX-based. |
+| **Windows 10/11 (x64)** | `Zeidex.Studio_0.1.0_x64-setup.exe` | 44 MB | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
+| **Linux (x86_64)** | `Zeidex.Studio_0.1.0_amd64.deb` | 49 MB | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
+| **Linux (x86_64)** | `Zeidex.Studio_0.1.0_amd64.AppImage` | 126 MB | Any distribution; no installation, no root. |
 | **Linux (arm64)** | `Zeidex.Studio_0.1.0_arm64.deb` | 52 MB | Raspberry Pi 4/5 and ARM laptops on Debian 12+ or Ubuntu 22.04+. |
 
 > The x64 packages are produced on GitHub's native runners from the tagged source,
