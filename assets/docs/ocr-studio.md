@@ -17,7 +17,11 @@ both go through the same adoption path, and a dropped file with any other
 extension is refused by name instead of failing later inside the engine. Only
 one document can be loaded at a time, and neither door opens while a
 recognition run is in flight: the old file's results would otherwise land in the
-new file's panes. An image becomes one page. A PDF is rendered with pdfium at 300 dpi, one
+new file's panes. An image becomes one page, decoded with its EXIF or TIFF
+orientation applied — a phone stores the sensor frame sideways and records how
+to turn it upright in the tag, which `image::open` ignores. Preview and
+detection share that loader, so a portrait photo is read upright and its region
+boxes land on the pixels shown. A PDF is rendered with pdfium at 300 dpi, one
 bounded chunk at a time, so a long document does not hold every bitmap in
 memory. Detection and recognition for a chunk run in parallel on rayon; the
 Studio follows along through `ocr-progress` events. Because a chunk finishes

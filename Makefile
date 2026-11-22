@@ -61,13 +61,14 @@ ocr-test:
 	 export ZEIDEX_TEST_ARABIC_IMAGE="$(CURDIR)/core/ocr_engine/tests/fixtures/arabic_lines.png"; \
 	 export ZEIDEX_TEST_TABLE_IMAGE="$(CURDIR)/core/ocr_engine/tests/fixtures/table.png"; \
 	 export ZEIDEX_TEST_PDF="$(CURDIR)/core/ocr_engine/tests/fixtures/table.pdf"; \
+	 export ZEIDEX_TEST_PHOTO="$(CURDIR)/core/ocr_engine/tests/fixtures/photo-table.jpg"; \
 	 if [ -f "$(CURDIR)/src-tauri/resources/lib/libpdfium.so" ]; then \
 		export ZEIDEX_TEST_PDFIUM_LIB="$(CURDIR)/src-tauri/resources/lib/libpdfium.so"; \
 	 fi; \
 	 if [ -n "$$ZEIDEX_ORT_DYLIB" ]; then export ORT_DYLIB_PATH="$$ZEIDEX_ORT_DYLIB"; fi; \
 	 cargo test --manifest-path $(CORE_MANIFEST) -p zeidex-ocr \
 		--test ocr_smoke --test layout_smoke --test table_smoke --test ocr_accuracy \
-		--test arabic_smoke --test pdf_smoke -- --nocapture && \
+		--test arabic_smoke --test pdf_smoke --test photo_smoke -- --nocapture && \
 	 cargo test --manifest-path $(CORE_MANIFEST) -p zeidex-exporter \
 		--test export ocr_output_exports_to_word_and_excel -- --nocapture
 

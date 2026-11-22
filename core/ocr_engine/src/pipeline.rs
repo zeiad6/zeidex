@@ -135,7 +135,10 @@ impl OcrEngine {
 
     /// Processes a raster image (PNG/JPEG/TIFF/BMP/WebP).
     pub fn process_image(&self, path: &Path) -> OcrResult<PageResult> {
-        let image = image::open(path)?;
+        // The camera's orientation tag is applied here, not by the decoder:
+        // `image::open` ignores it and a portrait phone photo would arrive
+        // sideways. The preview uses the same loader, so boxes line up.
+        let image = crate::imageio::open_oriented(path)?;
         self.process_page_image(0, &image)
     }
 
@@ -157,7 +160,9 @@ impl OcrEngine {
                 .map_err(|err| OcrError::Pdf(err.to_string()))?;
             pdf::render_document_page(&document, page as i32, self.dpi)?
         } else {
-            image::open(path)?
+            // Same loader as `process_image`: a preview drawn from the raw
+            // pixels of a rotated photo would not match the recognized boxes.
+            crate::imageio::open_oriented(path)?
         };
 
         let (width, height) = source.dimensions();

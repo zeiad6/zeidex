@@ -385,7 +385,11 @@ why the OCR and export logic can be tested in CI on two operating systems.
       the default on synthetic evidence alone
 - [ ] Adopt a new Arabic recognizer once a labelled corpus of real Arabic scans
       confirms the gain
-- [ ] Handwriting and low-quality photo handling
+- [x] Phone photos: apply the EXIF/TIFF orientation tag before preview and
+      detection, so a sideways portrait page is read upright
+- [ ] Handwriting and photo enhancement (lighting, skew, blur) — handwriting is
+      model-bound: PP-OCRv4 is trained on print, so a recognizer change comes
+      before any pipeline work there
 - [x] Page-range selection when reading a PDF
 - [x] Cancel a long PDF run between pages without closing the Studio
 - [ ] Signed installers for macOS, Windows and Linux

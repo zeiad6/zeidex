@@ -4,6 +4,7 @@ pub mod bidi;
 pub mod dict;
 pub mod error;
 pub mod geometry;
+pub mod imageio;
 pub mod layout;
 pub mod onnx;
 pub mod pdf;
