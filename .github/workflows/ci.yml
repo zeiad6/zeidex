@@ -107,6 +107,9 @@ jobs:
           ZEIDEX_TEST_TABLE_IMAGE: ${{ github.workspace }}/core/ocr_engine/tests/fixtures/table.png
           ZEIDEX_TEST_PDF: ${{ github.workspace }}/core/ocr_engine/tests/fixtures/table.pdf
         run: |
+          # The lib tests include the shared-ONNX-environment case, which only
+          # means something on a runner that actually has the runtime staged.
+          cargo test --manifest-path core/Cargo.toml -p zeidex-ocr --lib
           cargo test --manifest-path core/Cargo.toml -p zeidex-ocr \
             --test ocr_smoke --test layout_smoke --test table_smoke --test ocr_accuracy \
             --test arabic_smoke --test pdf_smoke

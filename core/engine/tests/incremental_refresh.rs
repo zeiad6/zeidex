@@ -157,7 +157,11 @@ fn removing_a_folder_removes_its_children_but_not_a_sibling_sharing_a_prefix() {
         "`reports` must not match `reports-old.txt`: {paths:?}"
     );
     assert!(!paths.iter().any(|path| path.ends_with("child.txt")));
-    assert!(!paths.iter().any(|path| path.ends_with("/reports")));
+    assert!(
+        !paths
+            .iter()
+            .any(|path| Path::new(path).ends_with("reports"))
+    );
 }
 
 #[test]
@@ -228,12 +232,18 @@ fn a_moved_in_folder_indexes_its_subtree_once() {
     assert_eq!(outcome.added, 3, "folder, sub-folder and file");
     let paths = fixture.paths();
     assert_eq!(paths.len(), 3, "{paths:?}");
-    assert!(paths.iter().any(|path| path.ends_with("/moved")));
-    assert!(paths.iter().any(|path| path.ends_with("/moved/sub")));
+    // Component-wise, not a string suffix: Windows stores `moved\sub`, and a
+    // `/moved` suffix test passed on Unix while failing there.
+    assert!(paths.iter().any(|path| Path::new(path).ends_with("moved")));
     assert!(
         paths
             .iter()
-            .any(|path| path.ends_with("/moved/sub/data.txt"))
+            .any(|path| Path::new(path).ends_with("moved/sub"))
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|path| Path::new(path).ends_with("moved/sub/data.txt"))
     );
 }
 

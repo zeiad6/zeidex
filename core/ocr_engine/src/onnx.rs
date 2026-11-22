@@ -158,10 +158,23 @@ fn environment() -> OcrResult<ort::environment::Environment> {
     if let Some(environment) = ENVIRONMENT.get() {
         return Ok(environment.clone());
     }
-    let built = ort::init()
-        .with_name("zeidex-ocr")
-        .with_execution_providers(execution_providers())
-        .build()?;
+    // `ort` panics rather than returning an error when the dylib cannot be
+    // loaded, and a missing `libonnxruntime.so` must surface as "OCR is
+    // unavailable", not as a panic that takes the caller with it.
+    let built = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ort::init()
+            .with_name("zeidex-ocr")
+            .with_execution_providers(execution_providers())
+            .build()
+    })) {
+        Ok(Ok(environment)) => environment,
+        Ok(Err(err)) => return Err(OcrError::Onnx(err)),
+        Err(_) => {
+            return Err(OcrError::RuntimeUnavailable(
+                "the shared library could not be loaded".to_string(),
+            ));
+        }
+    };
     let _ = ENVIRONMENT.set(built.clone());
     Ok(built)
 }

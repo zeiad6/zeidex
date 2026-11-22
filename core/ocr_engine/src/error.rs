@@ -7,6 +7,13 @@ pub enum OcrError {
     #[error("ONNX runtime error: {0}")]
     Onnx(#[from] ort::Error),
 
+    /// The runtime library itself is missing or unloadable. `ort` panics in
+    /// that case instead of returning an error, so `environment()` catches the
+    /// panic and reports it here: a machine without `libonnxruntime.so` should
+    /// see "OCR is unavailable", not a dead process.
+    #[error("ONNX Runtime is not available: {0}")]
+    RuntimeUnavailable(String),
+
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
 
