@@ -372,7 +372,8 @@ All numbers below were measured on this host; no synthetic estimate is reported 
 | Idle CPU, launcher visible | real app under Xvfb, software rendering, no interaction, 6 s `/proc` sample | **60–80% → 0.0%** of one core (blurred aurora animation removed) |
 | Frontend bundle | production build | JS 387.89 kB (gzip 114.78 kB), CSS 69.70 kB (gzip 12.60 kB) |
 | Release binary | aarch64 Linux, `cargo build --release` | 19,232,984 bytes (final, after §2.25–§2.29); the earlier build was 19,036,376 bytes, and the −524 KB step came from removing `tauri-plugin-fs` (§2.22) |
-| Installer | Debian arm64 | 54,725,644 bytes (52.19 MiB), installed size 85,851 KB |
+| Installer | Debian arm64 | 54,725,630 bytes (52.2 MiB), installed size 85,851 KB |
+| Installer | Debian amd64 (CI) | 51,153,890 bytes (48.8 MiB), installed size 91,295 KB |
 | Indexed-path lookup | `EXPLAIN QUERY PLAN` on the `candidates` schema | `SCAN candidates` → `SEARCH candidates USING COVERING INDEX idx_candidates_path (path=?)` (§2.23) |
 
 The 100k-file numbers are from `core/batch/tests/perf_batch.rs` (ignored by default, run with `--release -- --ignored --nocapture`). The "was" figures come from the same test on the same host immediately before this round's matcher changes; the exact-lookup path is a hash probe either way, so its difference is run-to-run noise rather than a regression. The pack numbers are from `core/ocr_engine/tests/pack_smoke.rs` with the real ONNX models. No before/after claim is made for paths that were not measured before the change.
@@ -483,12 +484,15 @@ verification of the produced packages.
 | `python3 scripts/verify-xlsx.py core/target/tmp/zeidex-batch-report.xlsx` | **PASS** — 4 sheets, results filter `A1:K8`, 7 result rows, 1 missing row, 2 multiple rows, `chart series: ['Summary!$B$7:$B$10']` |
 | Startup smoke, real binary under Xvfb | **PASS** — 30 s run of the rebuilt release binary with a throwaway `XDG_DATA_HOME`, no panic, exit only on the timeout, `zeidex.db` created with the expected nine tables, so `AppState::new` and the capability roots apply cleanly at startup |
 | Startup prune, real binary under Xvfb | **PASS** — a `document_text` row pointing at a deleted file was inserted with one token; the next launch printed `zeidex: dropped 1 stale document index entries (1 missing, 0 changed)` and both the row and its token were gone afterwards (1 → 0 each) |
-| `tauri build --bundles deb` (from the repository root, frontend pre-built) | **PASS** — `Zeidex Studio_0.1.0_arm64.deb`, rebuilt after this round's fixes |
-| `dpkg-deb --info` / `dpkg-deb -c` | **PASS** (valid package, expected payload) |
-| `ldd` on the release binary | **PASS** (no missing libraries) |
+| `tauri build --bundles deb` (from the repository root, frontend pre-built) | **PASS** — `Zeidex Studio_0.1.0_arm64.deb`, rebuilt from the pushed commit after this round's fixes |
+| Release workflow `45009610649` (tag `v0.1.0` → `4469de5`) | **PASS** — Linux and Windows jobs both succeeded; the four x64 assets were uploaded to the release |
+| `dpkg-deb -I` on the amd64 and arm64 packages | **PASS** — `zeidex-studio 0.1.0`, correct architecture, exactly three dependencies, installed size 91,295 / 85,851 KB |
+| Package format checks | **PASS** — AppImage `AI\x02` magic at offset 8 and x86-64 ELF; MSI OLE header `d0cf11e0a1b11ae1`; NSIS `MZ`; `.deb` ar archive read by `dpkg-deb` |
+| `ldd` on the extracted arm64 binary | **PASS** (no missing libraries) |
+| `SHA256SUMS` round-trip | **PASS** — re-downloaded from the published release and compared with the local file (`diff` clean) |
 | GUI launch | **BLOCKED** (no display in PRoot) |
 | Browser visual pass | **BLOCKED** (Chrome/Playwright cannot start in this host) |
-| Windows MSI/NSIS, macOS DMG, AppImage | **NOT RUN** (no toolchains/display here; macOS is not in the release matrix) |
+| AppImage execution, Windows MSI/NSIS runtime, macOS DMG | **NOT RUN** (x86-64 binaries on an aarch64 host; no Windows or macOS machine; macOS is not in the release matrix) |
 
 Test totals: **679 automated tests passed, 0 failed** (548 core + 64 shell + 67 frontend), plus the scale, pack and workbook checks above. The count is the sum of every `test result` line in a complete, untruncated run of each suite, not an estimate. The core run used real models, real fixtures and a real v5 pack for `pack_smoke`; `arabic_v5_smoke` was run separately against the v5 mobile recognizer and read all three lines at 0.920, 0.900 and 0.885 confidence. The only tests not counted are the two `#[ignore]`d ones (the 100k scale test and a large-report test), which are run separately.
 
@@ -496,12 +500,19 @@ Test totals: **679 automated tests passed, 0 failed** (548 core + 64 shell + 67 
 
 ## 8. Build and Release Status
 
-- **Built:** `src-tauri/target/release/bundle/deb/Zeidex Studio_0.1.0_arm64.deb` — 54,725,644 bytes (52.19 MiB), `zeidex-studio 0.1.0 arm64`, SHA-256 `0fa7eefef0edd1cfdb7d9bafe21ba07c9d206fa2110569f67889066ea9ecf8af`, installed size 85,851 KB, depends `libayatana-appindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0`. Built from the repository root with the frontend pre-built (`npm run build` → 2.36 s, 387.93 kB JS / 69.70 kB CSS); `cargo` finished the release profile in 1 m 50 s. This is the artifact rebuilt after the §2.25–§2.29 fixes, and it is the one the two startup smokes below were run against.
-- **Dependency list:** the earlier `bundle.linux.deb.depends` entries were removed from `tauri.conf.json` after they turned out to be *added* to Tauri's auto-detected list, which shipped every dependency twice (`libwebkit2gtk-4.1-0, libgtk-3-0 | libgtk-3-0t64, libayatana-appindicator3-1, libayatana-appindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0`). Auto-detection reads the binary's real linkage and names exactly three packages, with no duplicates. The `| libgtk-3-0t64` alternative is not lost: on Ubuntu 24.04+ the `libgtk-3-0t64` package declares `Provides: libgtk-3-0` (verified on this host: `Provides: gtk3-binver-3.0.0, libgtk-3-0 (= 3.24.52-0ubuntu1)`), so a plain `libgtk-3-0` dependency resolves there.
-- **Payload:** 19.0 MB binary, 25.1 MB `libonnxruntime.so`, 8.3 MB `libpdfium.so`, compact bundled models only; Tier 2/3 packs are downloaded on demand.
-- **Libraries:** `ldd` on the extracted binary reports no missing shared objects.
-- **Launch:** verified headless under Xvfb — the packaged binary starts, creates `zeidex.db`, runs its startup prune thread and stays up until killed by the timeout, with only the expected `libEGL`/appindicator warnings. Interactive click-through (real pointer input on a real display) is what this host cannot do; that is an environment limit, not a link or packaging failure.
-- **Not built/verified:** AppImage, Windows MSI/NSIS, macOS DMG, signed packages. The release workflow covers Linux and Windows on native runners; macOS is documented as build-from-source, not a shipped artifact.
+- **Published:** [`v0.1.0`](https://github.com/zeiad6/zeidex/releases/tag/v0.1.0) — the tag now points at `4469de5`, and all six assets were replaced with builds of that commit. The previous four x64 assets and their `SHA256SUMS` were deleted first; nothing from the old build remains on the release.
+- **x64 bundles, built by CI:** run [`45009610649`](https://github.com/zeiad6/zeidex/actions/runs/45009610649) from tag `v0.1.0` — both jobs (Linux, Windows) succeeded and uploaded:
+  - `Zeidex.Studio_0.1.0_amd64.deb` — 51,153,890 bytes (48.8 MiB), installed size 91,295 KB, depends `libayatana-appindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0`, SHA-256 `4cca3a6df419027ebeb05b0405b984ee3dbbb58f502436d57218bac7b4523b2f`.
+  - `Zeidex.Studio_0.1.0_amd64.AppImage` — 132,495,864 bytes (126.4 MiB), SHA-256 `1e2dd7a8f9384301f63af1c8dc678b7b32aea7e1a9b6d19064a1d52da4de0cec`.
+  - `Zeidex.Studio_0.1.0_x64_en-US.msi` — 50,704,384 bytes (48.4 MiB), SHA-256 `0b0dee5a969488b9e2365f318edf76e7cfbc4d153858d1b4162ff2af745f60b8`.
+  - `Zeidex.Studio_0.1.0_x64-setup.exe` — 45,618,021 bytes (43.5 MiB), SHA-256 `af7fcd3375a50f0aa680bc480f4abf1fc0ab0b07da33c27cee4a379aec668808`.
+- **arm64 bundle, built here:** `Zeidex.Studio_0.1.0_arm64.deb` — 54,725,630 bytes (52.2 MiB), installed size 85,851 KB, same three dependencies, SHA-256 `c6a763da330d65d2ce50da598d6fea1735ced0f3f318ea29a2475ab041a07a97`. Built from the same commit with `tauri build --bundles deb` after `npm run build` (2.36 s, 387.93 kB JS / 69.70 kB CSS); `cargo` finished the release profile in about 1 m 50 s.
+- **Artifact checks:** `dpkg-deb -I` on both `.deb` files reports `zeidex-studio 0.1.0` with the right architecture and exactly three dependencies (no duplicates). The AppImage carries the `AI\x02` magic at offset 8 and is an x86-64 ELF; the MSI is an OLE compound file (`d0cf11e0a1b11ae1`); the NSIS installer starts with `MZ`. `ldd` on the extracted arm64 binary reports no missing shared objects.
+- **Launch:** the packaged arm64 binary was extracted from the `.deb` and started under Xvfb with a throwaway `XDG_DATA_HOME` — no panic, `zeidex.db` created with the expected tables, and the startup prune pass runs (verified separately by planting a stale row: `dropped 1 stale document index entries (1 missing, 0 changed)`, row and token both gone). The x64 packages cannot be executed on this aarch64 host.
+- **Dependency list:** the earlier `bundle.linux.deb.depends` entries were removed from `tauri.conf.json` after they turned out to be *added* to Tauri's auto-detected list, which shipped every dependency twice. Auto-detection reads the binary's real linkage and names exactly three packages. The `| libgtk-3-0t64` alternative is not lost: on Ubuntu 24.04+ `libgtk-3-0t64` declares `Provides: libgtk-3-0` (verified here: `Provides: gtk3-binver-3.0.0, libgtk-3-0 (= 3.24.52-0ubuntu1)`), so a plain `libgtk-3-0` dependency resolves there.
+- **Payload:** 19.2 MB binary, 25.1 MB `libonnxruntime.so`, 8.3 MB `libpdfium.so`, compact models only; Tier 2/3 packs are downloaded on demand and checksum-verified.
+- **Checksums:** `SHA256SUMS` on the release lists all five packages and was re-downloaded after upload to confirm it matches the local file byte for byte.
+- **Not verified:** Windows MSI/NSIS runtime behaviour and macOS (no such machines or toolchains here); AppImage execution (an x86-64 binary on an aarch64 host); code signing (no keys). The release workflow covers Linux and Windows on native runners; macOS is documented as build-from-source, not a shipped artifact.
 
 ---
 
