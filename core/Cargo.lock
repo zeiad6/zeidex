@@ -2247,6 +2247,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zeidex-batch"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "rust_xlsxwriter",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "zeidex-matching",
+ "zip 8.6.0",
+]
+
+[[package]]
 name = "zeidex-calc"
 version = "0.1.0"
 dependencies = [

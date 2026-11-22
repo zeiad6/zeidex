@@ -82,12 +82,14 @@ export default function Launcher({
   indexStatus,
   onToggleRtl,
   onOpenOcr,
+  onOpenBatch,
   onOpenSettings,
 }: {
   rtl: boolean;
   indexStatus: IndexStatus | null;
   onToggleRtl: () => void;
   onOpenOcr: () => void;
+  onOpenBatch: () => void;
   onOpenSettings: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -373,6 +375,14 @@ export default function Launcher({
             >
               <Icon name="scan" size={13} />
               {rtl ? "استوديو OCR" : "OCR Studio"}
+            </button>
+            <button
+              type="button"
+              onClick={onOpenBatch}
+              className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-iris-400/30 hover:bg-iris-400/10 hover:text-iris-400"
+            >
+              <Icon name="table" size={13} />
+              {rtl ? "البحث الدفعي" : "Batch Search"}
             </button>
             <button
               type="button"

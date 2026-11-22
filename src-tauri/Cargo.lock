@@ -6167,6 +6167,7 @@ dependencies = [
  "tokio",
  "windows",
  "zeidex-answers",
+ "zeidex-batch",
  "zeidex-calc",
  "zeidex-engine",
  "zeidex-exporter",
@@ -6182,6 +6183,17 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "zeidex-batch"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "rust_xlsxwriter",
+ "serde",
+ "thiserror 2.0.21",
+ "zeidex-matching",
 ]
 
 [[package]]

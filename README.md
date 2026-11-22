@@ -210,6 +210,22 @@ Why the details matter:
   expect.
 - **PDFs are rasterized locally** with pdfium — no ghostscript, no cloud converter.
 
+### Batch Search
+
+The launcher answers one query at a time. Batch Search takes a **list** — a
+column from a spreadsheet, an email, a folder listing — and asks, name by name,
+whether the file is in the index and what the closest thing is when it is not.
+Paste, import a `.txt`, or type; the parser splits on newlines and tabs (commas
+are legal in filenames), folds duplicates after normalization, and shows what it
+accepted before anything runs. A slider sets the match threshold from 50% to
+100%, and 100% means equality after normalization — nothing fuzzy can reach it.
+Results expand per name with file actions and multi-select, and **Export Excel**
+writes a four-sheet report: summary with a chart, a filterable results table,
+missing names, and every candidate for names that matched more than once.
+
+See [how the matching works](assets/docs/batch-search.md) for the score table,
+the Arabic folding rules, and the measured performance.
+
 ### Privacy
 
 | | |
@@ -392,6 +408,9 @@ why the OCR and export logic can be tested in CI on two operating systems.
       before any pipeline work there
 - [x] Page-range selection when reading a PDF
 - [x] Cancel a long PDF run between pages without closing the Studio
+- [x] Batch Search: a pasted or imported list of names, a 50–100% match
+      threshold, expandable results with file actions, and a four-sheet Excel
+      report — [how it matches](assets/docs/batch-search.md)
 - [ ] Signed installers for macOS, Windows and Linux
 - [ ] Plugin API for custom result providers
 
@@ -400,6 +419,7 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - [Architecture](assets/docs/architecture.md) — how the shell, the core and the frontend fit together
 - [Rust core](assets/docs/core.md) — crates, search pipeline, OCR internals
 - [OCR Studio](assets/docs/ocr-studio.md) — the document workbench, pane by pane
+- [Batch Search](assets/docs/batch-search.md) — a list of names, what the threshold means, and the Excel report
 - [Build and release](assets/docs/build-and-release.md) — requirements, targets, checks, bundling
 
 ## Contributing

@@ -86,6 +86,10 @@ pub fn run() -> anyhow::Result<()> {
         })
         .invoke_handler(tauri::generate_handler![
             commands::calc::calc_eval,
+            commands::batch::batch_parse,
+            commands::batch::batch_import,
+            commands::batch::batch_search,
+            commands::batch::batch_export,
             commands::search::search,
             commands::search::bootstrap_index,
             commands::search::candidate_count,

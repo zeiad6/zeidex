@@ -1,0 +1,19 @@
+[package]
+name = "zeidex-batch"
+description = "Batch filename search: list parsing, Arabic-aware fuzzy matching and an Excel report."
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+version = "0.1.0"
+
+[dependencies]
+rayon = "1"
+rust_xlsxwriter = "0.103"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+zeidex-matching = { path = "../matching" }
+
+[dev-dependencies]
+tempfile = "3"
+zip = "8"

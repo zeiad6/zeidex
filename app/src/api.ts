@@ -111,6 +111,59 @@ export type PipelineProgress =
   | { type: "page_done"; page: number; pages: number }
   | { type: "finished" };
 
+export type BatchStatus = "exact" | "high" | "possible" | "not_found";
+export type BatchMatchKind = "exact" | "stem" | "containment" | "tokens" | "fuzzy";
+export type BatchFileKind = "file" | "folder";
+
+/** What the review step shows before a search runs. */
+export interface ParsedList {
+  entries: string[];
+  /** Lines that were only whitespace or quotes. */
+  dropped_empty: number;
+  /** Entries folded into an earlier one because they normalize the same. */
+  duplicates: number;
+  /** Entries past the backend's ceiling that were not accepted. */
+  overflow: number;
+}
+
+export interface BatchMatch {
+  path: string;
+  name: string;
+  extension: string | null;
+  size_bytes: number | null;
+  modified_unix_s: number | null;
+  kind: BatchFileKind;
+  /** Integer percentage, the same number the threshold is compared against. */
+  score: number;
+  match_type: BatchMatchKind;
+}
+
+export interface BatchEntryResult {
+  requested: string;
+  status: BatchStatus;
+  matches: BatchMatch[];
+  total_matches: number;
+  duration_ms: number;
+}
+
+export interface BatchSummary {
+  total: number;
+  found: number;
+  not_found: number;
+  exact: number;
+  approximate: number;
+  multiple: number;
+  success_percent: number;
+  duration_ms: number;
+}
+
+export interface BatchReport {
+  threshold: number;
+  indexed_files: number;
+  entries: BatchEntryResult[];
+  summary: BatchSummary;
+}
+
 /**
  * Bounds for the numeric settings. They travel from the backend, which enforces
  * the same numbers, so the two cannot drift apart in a copy.
@@ -208,6 +261,12 @@ export const api = {
     invoke<void>("export_xlsx", { page, path }),
   exportXlsxPages: (pages: PageResult[], path: string) =>
     invoke<void>("export_xlsx_pages", { pages, path }),
+  batchParse: (text: string) => invoke<ParsedList>("batch_parse", { text }),
+  batchImport: (path: string) => invoke<ParsedList>("batch_import", { path }),
+  batchSearch: (entries: string[], threshold: number) =>
+    invoke<BatchReport>("batch_search", { entries, threshold }),
+  batchExport: (report: BatchReport, path: string) =>
+    invoke<void>("batch_export", { report, path }),
   onOcrProgress: (callback: (event: PipelineProgress) => void) =>
     listen<PipelineProgress>("ocr-progress", (event) => callback(event.payload)),
   onIndexStatus: (callback: (status: IndexStatus) => void): Promise<() => void> =>

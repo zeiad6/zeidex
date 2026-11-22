@@ -3,12 +3,13 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import type { IndexStatus } from "./index-status";
+import BatchSearch from "./components/BatchSearch";
 import Launcher from "./components/Launcher";
 import OcrStudio from "./components/OcrStudio";
 import Settings from "./components/Settings";
 import { clampToScreen, logicalScreen } from "./window-size";
 
-type Mode = "launcher" | "ocr" | "settings";
+type Mode = "launcher" | "ocr" | "settings" | "batch";
 
 const DIRECTION_KEY = "zeidex.direction";
 
@@ -21,6 +22,7 @@ const WINDOW_SIZE: Record<Mode, { width: number; height: number }> = {
   launcher: { width: 760, height: 520 },
   ocr: { width: 1280, height: 880 },
   settings: { width: 1140, height: 820 },
+  batch: { width: 1280, height: 880 },
 };
 
 /**
@@ -109,6 +111,8 @@ export default function App() {
     <div dir={rtl ? "rtl" : "ltr"} lang={rtl ? "ar" : "en"} className="h-full">
       {mode === "ocr" ? (
         <OcrStudio rtl={rtl} onBack={() => setMode("launcher")} />
+      ) : mode === "batch" ? (
+        <BatchSearch rtl={rtl} onBack={() => setMode("launcher")} />
       ) : mode === "settings" ? (
         <Settings
           rtl={rtl}
@@ -122,6 +126,7 @@ export default function App() {
           indexStatus={indexStatus}
           onToggleRtl={() => setDirection(!rtl)}
           onOpenOcr={() => setMode("ocr")}
+          onOpenBatch={() => setMode("batch")}
           onOpenSettings={() => setMode("settings")}
         />
       )}

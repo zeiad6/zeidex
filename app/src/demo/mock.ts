@@ -1,4 +1,5 @@
 import type { PageResult } from "../api";
+import { DEMO_LIST, parseList, searchBatch } from "./batch";
 import {
   CLIPS,
   MODELS,
@@ -82,6 +83,20 @@ export function installMock() {
           : null;
       case "candidate_count":
         return 12_804;
+      case "batch_parse":
+        return parseList(String(args.text ?? ""));
+      case "batch_import":
+        return parseList(DEMO_LIST);
+      case "batch_search":
+        return searchBatch(
+          Array.isArray(args.entries) ? (args.entries as string[]) : [],
+          Number(args.threshold ?? 70),
+        );
+      case "batch_export":
+        return null;
+      case "open_target":
+      case "reveal_target":
+        return null;
       case "bootstrap_index":
         return 12_804;
       case "clipboard_list":
@@ -127,8 +142,14 @@ export function installMock() {
       }
       case "plugin:dialog|open":
         return DEMO_PDF;
-      case "plugin:dialog|save":
-        return "/home/you/Documents/zeidex-export.docx";
+      case "plugin:dialog|save": {
+        // The plugin passes `{ options: { defaultPath } }`.
+        const options = (args.options ?? args) as { defaultPath?: string };
+        const suggested = String(options.defaultPath ?? "");
+        return suggested.endsWith(".xlsx")
+          ? "/home/you/Documents/zeidex-batch-2026-11-22.xlsx"
+          : "/home/you/Documents/zeidex-export.docx";
+      }
       case "plugin:event|listen": {
         const event = String(args.event ?? "");
         const handler = Number(args.handler ?? 0);

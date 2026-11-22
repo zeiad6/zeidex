@@ -192,6 +192,16 @@ pub struct ClipboardEntry {
     pub pinned: bool,
 }
 
+/// One indexed file or folder, as Batch Search reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexedPath {
+    pub path: String,
+    /// The file name alone, which is what a pasted list is matched against.
+    pub name: String,
+    pub is_folder: bool,
+    pub modified_unix_s: Option<i64>,
+}
+
 pub struct SqliteStore {
     conn: Connection,
     /// How many unpinned text clips are kept. The user's
@@ -504,6 +514,31 @@ impl SqliteStore {
             });
         }
 
+        Ok(out)
+    }
+
+    /// Every indexed file and folder, in the narrow shape Batch Search needs.
+    ///
+    /// Not `load_candidates`: an app, a setting and a command row have no
+    /// filesystem target, and a batch matches names against files. Loading only
+    /// the four columns that are used also keeps the row count (tens of
+    /// thousands) from turning into a `Candidate` per row.
+    pub fn load_indexed_paths(&self) -> StorageResult<Vec<IndexedPath>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, title, kind, fs_modified_at_unix_s
+             FROM candidates WHERE kind IN (?1, ?2) ORDER BY title ASC",
+        )?;
+        let mut rows = stmt.query([CandidateKind::FILE_KEY, CandidateKind::FOLDER_KEY])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            let kind_raw: String = row.get(2)?;
+            out.push(IndexedPath {
+                path: row.get(0)?,
+                name: row.get(1)?,
+                is_folder: kind_raw == CandidateKind::FOLDER_KEY,
+                modified_unix_s: row.get(3)?,
+            });
+        }
         Ok(out)
     }
 
@@ -2091,6 +2126,37 @@ mod tests {
         assert_eq!(loaded[0].path.as_ref(), "/Applications/Test.app");
         assert_eq!(loaded[0].use_count, 0);
         assert_eq!(loaded[0].last_used_at_unix_s, None);
+    }
+
+    #[test]
+    fn batch_rows_are_files_and_folders_only() {
+        let mut store = SqliteStore::open_in_memory().expect("open sqlite in memory");
+        let mut file = candidate("file:/docs/report.pdf", "report.pdf", "/docs/report.pdf");
+        file.kind = CandidateKind::File;
+        file.fs_modified_at_unix_s = Some(1_700_000_000);
+        let mut folder = candidate("folder:/docs/Archive", "Archive", "/docs/Archive");
+        folder.kind = CandidateKind::Folder;
+        // An app row is indexed but has no name to find on disk.
+        let app = candidate("app:test", "Test App", "/Applications/Test.app");
+
+        store
+            .upsert_candidates(&[file, folder, app])
+            .expect("insert candidates");
+
+        let rows = store.load_indexed_paths().expect("load indexed paths");
+        assert_eq!(rows.len(), 2);
+        let report = rows
+            .iter()
+            .find(|row| row.name == "report.pdf")
+            .expect("file row");
+        assert_eq!(report.path, "/docs/report.pdf");
+        assert!(!report.is_folder);
+        assert_eq!(report.modified_unix_s, Some(1_700_000_000));
+        let archive = rows
+            .iter()
+            .find(|row| row.name == "Archive")
+            .expect("folder row");
+        assert!(archive.is_folder);
     }
 
     #[test]
