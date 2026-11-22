@@ -31,6 +31,17 @@ the end is clamped — and `PageResult::page_index` keeps the document's own pag
 number, so the preview and the page selector show page 5 of the file even when
 only pages 5–7 were read. Progress counts the selected pages.
 
+While a PDF run is in flight the button becomes **Cancel**. The flag is checked
+between pages, so the click answers at once and the run stops before starting
+the next page; a page already inside ONNX Runtime finishes first, because the
+runtime has no interruption point. Cancelling discards the pages of that run
+instead of adopting a partial document — the previously loaded pages stay as
+they were — and reports a neutral notice rather than an error. A single image
+run has no between-page checkpoint, so it shows a spinner instead of a button
+that could not answer. The shell keeps one cancellation token at a time and
+compares it by pointer, so a run that finishes late cannot clear the token of
+the run that replaced it.
+
 ## The two panes
 
 **Left — the page.** `ocr_page_preview` renders the page to a PNG data URL, so

@@ -387,6 +387,7 @@ why the OCR and export logic can be tested in CI on two operating systems.
       confirms the gain
 - [ ] Handwriting and low-quality photo handling
 - [x] Page-range selection when reading a PDF
+- [x] Cancel a long PDF run between pages without closing the Studio
 - [ ] Signed installers for macOS, Windows and Linux
 - [ ] Plugin API for custom result providers
 

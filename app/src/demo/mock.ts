@@ -1,3 +1,4 @@
+import type { PageResult } from "../api";
 import {
   CLIPS,
   MODELS,
@@ -19,9 +20,47 @@ const DEMO_PDF = "/home/you/Documents/Invoices/invoice-2026-014.pdf";
  */
 export function installMock() {
   const callbacks = new Map<number, (payload: unknown) => void>();
+  // Event name to the callback id `plugin:event|listen` was given, so the mock
+  // can emit the same `ocr-progress` events the shell does.
+  const listeners = new Map<string, number>();
   let nextCallback = 1;
   let clipboardPaused = false;
   let clips = CLIPS.slice();
+  // The PDF run a Cancel click would stop, if one is in flight.
+  let pdfRun: { cancelled: boolean } | null = null;
+
+  const emit = (event: string, payload: unknown) => {
+    const id = listeners.get(event);
+    if (id === undefined) return;
+    callbacks.get(id)?.({ event, id, payload });
+  };
+
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Four pages paced like a real run, so the Cancel button has something to
+  // stop and the progress bar moves visibly. Pages arrive in order; the real
+  // pipeline may not, which is why the Studio counts them instead.
+  const processPdf = async (first: number, last: number) => {
+    const run = { cancelled: false };
+    pdfRun = run;
+    const pages = last - first + 1;
+    try {
+      emit("ocr-progress", { type: "started", pages });
+      const results: PageResult[] = [];
+      for (let offset = 0; offset < pages; offset += 1) {
+        await delay(450);
+        // The same between-page checkpoint the pipeline has: a page already
+        // inside the runtime would finish, and the next one never starts.
+        if (run.cancelled) throw "cancelled";
+        emit("ocr-progress", { type: "page_done", page: offset, pages });
+        results.push({ ...SAMPLE_PAGE, page_index: first + offset });
+      }
+      emit("ocr-progress", { type: "finished" });
+      return results;
+    } finally {
+      if (pdfRun === run) pdfRun = null;
+    }
+  };
 
   const search = (query: string): typeof RESULTS => {
     const needle = query.trim().toLowerCase();
@@ -67,7 +106,17 @@ export function installMock() {
       case "ocr_process_image":
         return SAMPLE_PAGE;
       case "ocr_process_pdf":
-        return [SAMPLE_PAGE];
+        return processPdf(0, 3);
+      case "ocr_process_pdf_range":
+        return processPdf(
+          Math.max(1, Number(args.firstPage ?? 1)),
+          Math.max(1, Number(args.lastPage ?? 4)),
+        );
+      case "ocr_cancel": {
+        if (!pdfRun) return false;
+        pdfRun.cancelled = true;
+        return true;
+      }
       case "translate_text": {
         const lang = String(args.targetLang ?? "en");
         return {
@@ -80,10 +129,21 @@ export function installMock() {
         return DEMO_PDF;
       case "plugin:dialog|save":
         return "/home/you/Documents/zeidex-export.docx";
-      case "plugin:event|listen":
-        return nextCallback;
-      case "plugin:event|unlisten":
+      case "plugin:event|listen": {
+        const event = String(args.event ?? "");
+        const handler = Number(args.handler ?? 0);
+        listeners.set(event, handler);
+        return handler;
+      }
+      case "plugin:event|unlisten": {
+        const event = String(args.event ?? "");
+        const eventId = Number(args.eventId ?? 0);
+        // One event can briefly hold two handlers: a StrictMode remount listens
+        // again before the first listener's promise resolves, and that first
+        // cleanup must not delete the handler the second listen installed.
+        if (listeners.get(event) === eventId) listeners.delete(event);
         return null;
+      }
       default:
         return null;
     }
@@ -104,6 +164,15 @@ export function installMock() {
       currentWebview: { windowLabel: "main", label: "main" },
     },
     convertFileSrc: (path: string) => path,
+  };
+
+  // The event API unregisters through its own internals object before it calls
+  // the command; without it every unmount rejects with a TypeError.
+  (window as unknown as { __TAURI_EVENT_PLUGIN_INTERNALS__: unknown })
+    .__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener(event: string, eventId: number) {
+      if (listeners.get(event) === eventId) listeners.delete(event);
+    },
   };
 
   // A desktop-like backdrop, so element screenshots are not cut out of a void.

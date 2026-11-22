@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use image::{DynamicImage, GenericImageView};
 use rayon::prelude::*;
@@ -61,6 +62,18 @@ pub enum PipelineProgress {
     Started { pages: usize },
     PageDone { page: usize, pages: usize },
     Finished,
+}
+
+/// Whether the caller asked this run to stop.
+///
+/// `None` is the non-cancellable path and never stops. The load is relaxed
+/// ordering on a one-way flag: the only requirement is that the next page sees
+/// the write, which an atomic store guarantees on every platform.
+fn stop_requested(cancel: Option<&AtomicBool>) -> OcrResult<()> {
+    match cancel {
+        Some(flag) if flag.load(Ordering::Relaxed) => Err(OcrError::Cancelled),
+        _ => Ok(()),
+    }
 }
 
 /// Resolves a requested 1-based inclusive page window into a 0-based range.
@@ -170,7 +183,19 @@ impl OcrEngine {
         path: &Path,
         progress: &(dyn Fn(PipelineProgress) + Sync),
     ) -> OcrResult<Vec<PageResult>> {
-        self.process_pdf_window(path, None, progress)
+        self.process_pdf_window(path, None, None, progress)
+    }
+
+    /// Same as [`Self::process_pdf`], but stops between pages when `cancel` is
+    /// set. A page already being recognized finishes first: ONNX Runtime has no
+    /// interruption point, so the worst case is one page, not the document.
+    pub fn process_pdf_cancellable(
+        &self,
+        path: &Path,
+        cancel: &AtomicBool,
+        progress: &(dyn Fn(PipelineProgress) + Sync),
+    ) -> OcrResult<Vec<PageResult>> {
+        self.process_pdf_window(path, None, Some(cancel), progress)
     }
 
     /// Renders pages `first..=last` (1-based) and OCRs only those pages.
@@ -186,15 +211,31 @@ impl OcrEngine {
         last: usize,
         progress: &(dyn Fn(PipelineProgress) + Sync),
     ) -> OcrResult<Vec<PageResult>> {
-        self.process_pdf_window(path, Some((first, last)), progress)
+        self.process_pdf_window(path, Some((first, last)), None, progress)
+    }
+
+    /// The same window with a cancellation flag, for the shell's Cancel button.
+    pub fn process_pdf_range_cancellable(
+        &self,
+        path: &Path,
+        first: usize,
+        last: usize,
+        cancel: &AtomicBool,
+        progress: &(dyn Fn(PipelineProgress) + Sync),
+    ) -> OcrResult<Vec<PageResult>> {
+        self.process_pdf_window(path, Some((first, last)), Some(cancel), progress)
     }
 
     fn process_pdf_window(
         &self,
         path: &Path,
         range: Option<(usize, usize)>,
+        cancel: Option<&AtomicBool>,
         progress: &(dyn Fn(PipelineProgress) + Sync),
     ) -> OcrResult<Vec<PageResult>> {
+        // A run cancelled before it starts must not open the document, emit
+        // progress, or spend a page's worth of CPU to learn it was cancelled.
+        stop_requested(cancel)?;
         let pdfium = self.pdfium.as_ref().ok_or_else(|| {
             OcrError::Pdf(
                 "no pdfium library configured; set ZEIDEX_PDFIUM_LIBRARY or bundle the shared library"
@@ -215,12 +256,16 @@ impl OcrEngine {
         while start < window.end {
             let end = (start + chunk).min(window.end);
             let images = (start..end)
-                .map(|index| pdf::render_document_page(&document, index as i32, self.dpi))
+                .map(|index| {
+                    stop_requested(cancel)?;
+                    pdf::render_document_page(&document, index as i32, self.dpi)
+                })
                 .collect::<OcrResult<Vec<_>>>()?;
             let chunk_results: Vec<OcrResult<PageResult>> = images
                 .par_iter()
                 .enumerate()
                 .map(|(offset, image)| {
+                    stop_requested(cancel)?;
                     let page = start + offset;
                     let result = self.process_page_image(page, image);
                     // Progress counts work done within this run; the page a
@@ -370,7 +415,22 @@ fn has_extension(path: &Path, extension: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::pdf_page_window;
+    use super::{pdf_page_window, stop_requested};
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn a_run_without_a_flag_never_stops() {
+        assert!(stop_requested(None).is_ok());
+    }
+
+    #[test]
+    fn a_set_flag_stops_the_run_with_the_cancelled_error() {
+        let flag = AtomicBool::new(false);
+        assert!(stop_requested(Some(&flag)).is_ok());
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        let err = stop_requested(Some(&flag)).expect_err("must stop");
+        assert_eq!(err.to_string(), "cancelled");
+    }
 
     #[test]
     fn all_pages_when_no_window_is_asked_for() {

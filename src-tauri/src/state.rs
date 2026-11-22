@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 use zeidex_engine::QueryEngine;
@@ -27,6 +28,12 @@ pub struct AppState {
     /// Lazily loaded OCR engine. `OcrEngine` is `Send + Sync`, so the `Arc` is
     /// cloned into blocking tasks.
     pub ocr: Mutex<Option<std::sync::Arc<OcrEngine>>>,
+    /// Cancellation token of the recognition run that owns the Studio, if any.
+    ///
+    /// The Studio runs one document at a time, so a single slot is enough. The
+    /// token is compared by pointer when a run ends: a command that finished
+    /// late must not clear the run that replaced it.
+    pub ocr_run: Mutex<Option<Arc<AtomicBool>>>,
     pub models_dir: PathBuf,
     pub pdfium_library: Option<PathBuf>,
     pub db_path: PathBuf,
@@ -73,6 +80,7 @@ impl AppState {
             last_clipboard: Mutex::new(None),
             clipboard_skip_next: std::sync::atomic::AtomicBool::new(false),
             ocr: Mutex::new(None),
+            ocr_run: Mutex::new(None),
             models_dir,
             pdfium_library,
             db_path,
@@ -85,6 +93,46 @@ impl AppState {
             && let Ok(mut guard) = self.engine.lock()
         {
             *guard = engine;
+        }
+    }
+
+    /// Starts a recognition run and returns the token that can stop it.
+    pub fn begin_ocr_run(&self) -> Arc<AtomicBool> {
+        let token = Arc::new(AtomicBool::new(false));
+        let mut guard = self
+            .ocr_run
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = Some(token.clone());
+        token
+    }
+
+    /// Releases the slot for `token`, leaving a newer run's token alone.
+    pub fn end_ocr_run(&self, token: &Arc<AtomicBool>) {
+        let mut guard = self
+            .ocr_run
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, token))
+        {
+            *guard = None;
+        }
+    }
+
+    /// Asks the live run to stop between pages. Returns whether one was live.
+    pub fn cancel_ocr_run(&self) -> bool {
+        let guard = self
+            .ocr_run
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match guard.as_ref() {
+            Some(token) => {
+                token.store(true, Ordering::Relaxed);
+                true
+            }
+            None => false,
         }
     }
 
@@ -216,4 +264,57 @@ fn find_bundled_library(app: &tauri::AppHandle, names: &[&str]) -> Option<PathBu
         .into_iter()
         .flat_map(|root| names.iter().map(move |name| root.join(name)))
         .find(|candidate| candidate.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppState;
+
+    // A fresh directory per test, removed at the end. The shell has no
+    // `tempfile` dependency and adding one for two tests is not worth a new
+    // crate in the lockfile.
+    fn test_state(name: &str) -> (std::path::PathBuf, AppState) {
+        let directory =
+            std::env::temp_dir().join(format!("zeidex-state-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("temp dir");
+        let state = AppState::new(directory.join("zeidex.db"), directory.join("models"), None)
+            .expect("state");
+        (directory, state)
+    }
+
+    #[test]
+    fn a_run_owns_its_token_until_it_ends() {
+        let (directory, state) = test_state("token");
+        assert!(
+            !state.cancel_ocr_run(),
+            "there is nothing to cancel before a run"
+        );
+        let token = state.begin_ocr_run();
+        assert!(!token.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(state.cancel_ocr_run(), "the live run is cancellable");
+        assert!(token.load(std::sync::atomic::Ordering::Relaxed));
+        state.end_ocr_run(&token);
+        assert!(!state.cancel_ocr_run(), "the slot is empty again");
+        drop(state);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn an_old_run_cannot_steal_or_clear_the_new_one() {
+        let (directory, state) = test_state("two-runs");
+        let first = state.begin_ocr_run();
+        let second = state.begin_ocr_run();
+        state.end_ocr_run(&first);
+        assert!(state.cancel_ocr_run(), "the second run is still live");
+        assert!(
+            !first.load(std::sync::atomic::Ordering::Relaxed),
+            "ending a run must not cancel it"
+        );
+        assert!(second.load(std::sync::atomic::Ordering::Relaxed));
+        state.end_ocr_run(&second);
+        assert!(!state.cancel_ocr_run(), "no run left to cancel");
+        drop(state);
+        let _ = std::fs::remove_dir_all(directory);
+    }
 }

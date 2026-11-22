@@ -12,7 +12,7 @@
 //! resampling quality.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use image::GenericImageView;
 
@@ -101,6 +101,25 @@ fn pdf_renders_and_ocrs_into_a_real_table() -> zeidex_ocr::OcrResult<()> {
     let past_end = engine.process_pdf_range(Path::new(&pdf_path), 2, 2, &progress);
     let message = past_end.expect_err("a page past the end must be rejected");
     assert!(message.to_string().contains("past the end"), "{message}");
+
+    // Cancel already set: the run must stop before opening the document, so no
+    // progress arrives and the Studio's Cancel button can answer instantly.
+    let seen_started = started.load(Ordering::SeqCst);
+    let seen_done = done.load(Ordering::SeqCst);
+    let cancel = AtomicBool::new(true);
+    let cancelled = engine.process_pdf_cancellable(Path::new(&pdf_path), &cancel, &progress);
+    let message = cancelled.expect_err("a cancelled run must not return pages");
+    assert_eq!(message.to_string(), "cancelled");
+    assert_eq!(
+        started.load(Ordering::SeqCst),
+        seen_started,
+        "a cancelled run must not announce pages"
+    );
+    assert_eq!(
+        done.load(Ordering::SeqCst),
+        seen_done,
+        "a cancelled run must not report a page as done"
+    );
 
     let preview = engine.page_preview(Path::new(&pdf_path), 0, 1200)?;
     let image = image::load_from_memory(&preview.png).expect("preview is a PNG");

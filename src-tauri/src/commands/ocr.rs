@@ -110,6 +110,10 @@ pub async fn ocr_process_image(
 }
 
 /// Processes a PDF, emitting `ocr-progress` events the Studio listens to.
+///
+/// Every PDF run takes the cancellation slot, so `ocr_cancel` always refers to
+/// the run the user is watching. The slot is released on both paths, including
+/// a join failure, so a panic cannot leave a dead token behind.
 #[tauri::command]
 pub async fn ocr_process_pdf(
     state: State<'_, AppState>,
@@ -117,15 +121,19 @@ pub async fn ocr_process_pdf(
     window: Window,
 ) -> Result<Vec<PageResult>, String> {
     let engine = state.ocr_engine().map_err(|err| err.to_string())?;
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let token = state.begin_ocr_run();
+    let finished = token.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
         let progress = |event: PipelineProgress| {
             let _ = window.emit("ocr-progress", event);
         };
-        engine.process_pdf(Path::new(&path), &progress)
+        engine.process_pdf_cancellable(Path::new(&path), &token, &progress)
     })
-    .await
-    .map_err(|err| err.to_string())?;
-    result.map_err(|err| err.to_string())
+    .await;
+    state.end_ocr_run(&finished);
+    outcome
+        .map_err(|err| err.to_string())?
+        .map_err(|err| err.to_string())
 }
 
 /// Processes a 1-based, inclusive page window of a PDF, emitting the same
@@ -140,13 +148,33 @@ pub async fn ocr_process_pdf_range(
     window: Window,
 ) -> Result<Vec<PageResult>, String> {
     let engine = state.ocr_engine().map_err(|err| err.to_string())?;
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let token = state.begin_ocr_run();
+    let finished = token.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
         let progress = |event: PipelineProgress| {
             let _ = window.emit("ocr-progress", event);
         };
-        engine.process_pdf_range(Path::new(&path), first_page, last_page, &progress)
+        engine.process_pdf_range_cancellable(
+            Path::new(&path),
+            first_page,
+            last_page,
+            &token,
+            &progress,
+        )
     })
-    .await
-    .map_err(|err| err.to_string())?;
-    result.map_err(|err| err.to_string())
+    .await;
+    state.end_ocr_run(&finished);
+    outcome
+        .map_err(|err| err.to_string())?
+        .map_err(|err| err.to_string())
+}
+
+/// Asks the running recognition to stop between pages.
+///
+/// Returns whether a run was live, so the Studio can distinguish "cancelled"
+/// from "the run finished before the click landed". A page already inside ONNX
+/// Runtime still completes; the pipeline stops before starting the next one.
+#[tauri::command]
+pub fn ocr_cancel(state: State<'_, AppState>) -> bool {
+    state.cancel_ocr_run()
 }

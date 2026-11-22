@@ -27,7 +27,10 @@ type Status =
   | { kind: "idle" }
   | { kind: "working"; message: string }
   | { kind: "error"; message: string }
-  | { kind: "done"; message: string };
+  | { kind: "done"; message: string }
+  // A user action with nothing wrong: a cancelled run, a refused drop. Red is
+  // for failures, green is for a finished job; this is neither.
+  | { kind: "notice"; message: string };
 
 type EditMode = "regions" | "text";
 
@@ -60,6 +63,9 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
   const unlistenRef = useRef<(() => void) | undefined>(undefined);
   const previewCache = useRef(new Map<string, PagePreview>());
   const runningRef = useRef(false);
+  // Set when the user asks to stop, so late `page_done` events cannot replace
+  // "Cancelling…" with a page counter for work that is being abandoned.
+  const cancellingRef = useRef(false);
 
   const page = pages[activePage];
   const isPdf = filePath?.toLowerCase().endsWith(".pdf") ?? false;
@@ -110,10 +116,12 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
           if (event.page < event.pages) finished.add(event.page);
           const done = Math.min(finished.size, event.pages);
           setProgress({ done, total: event.pages });
-          setStatus({
-            kind: "working",
-            message: `page ${done}/${event.pages}`,
-          });
+          if (!cancellingRef.current) {
+            setStatus({
+              kind: "working",
+              message: `page ${done}/${event.pages}`,
+            });
+          }
         }
       })
       .then((fn) => {
@@ -259,6 +267,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     setProgress(null);
     // The ref is set with the state, not by an effect: a drop can arrive before
     // the next render and must still see that a run owns the Studio.
+    cancellingRef.current = false;
     runningRef.current = true;
     setRunning(true);
     try {
@@ -274,10 +283,38 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
       setStatus({ kind: "idle" });
     } catch (err) {
       setProgress(null);
-      setStatus({ kind: "error", message: String(err) });
+      const message = String(err);
+      setStatus(
+        message === "cancelled"
+          ? { kind: "notice", message: rtl ? "أُلغي التشغيل" : "Recognition cancelled" }
+          : { kind: "error", message },
+      );
     } finally {
+      cancellingRef.current = false;
       runningRef.current = false;
       setRunning(false);
+    }
+  };
+
+  const cancelRun = async () => {
+    if (!runningRef.current) return;
+    // Set before the round trip: a `page_done` event for the page already in
+    // flight must not overwrite the cancellation message.
+    cancellingRef.current = true;
+    try {
+      const accepted = await api.ocrCancel();
+      if (!accepted) {
+        // The run ended before the click landed; its own result owns the
+        // status, so leave it alone instead of leaving "Cancelling…" behind.
+        cancellingRef.current = false;
+        return;
+      }
+      // The flag is read between pages: the click answers at once, and the run
+      // ends when the page already inside ONNX Runtime finishes.
+      setStatus({ kind: "working", message: rtl ? "جارٍ الإلغاء…" : "Cancelling…" });
+    } catch (err) {
+      cancellingRef.current = false;
+      setStatus({ kind: "error", message: String(err) });
     }
   };
 
@@ -422,15 +459,32 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
               <Icon name="folder" size={13} />
               {rtl ? "فتح ملف" : "Open file"}
             </button>
-            <button
-              type="button"
-              onClick={runOcr}
-              disabled={!filePath || working}
-              className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-accent-400 to-iris-400 px-3.5 py-1.5 text-xs font-semibold text-ink-950 shadow-[0_8px_24px_-10px_rgb(34_211_238/0.8)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Icon name={working ? "refresh" : "scan"} size={13} className={working ? "animate-spin" : ""} />
-              {working ? (rtl ? "يعمل…" : "Working…") : rtl ? "تشغيل OCR" : "Run OCR"}
-            </button>
+            {working && isPdf ? (
+              <button
+                type="button"
+                onClick={cancelRun}
+                className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-semibold text-zinc-200 transition hover:bg-white/10 hover:text-white"
+              >
+                <Icon name="x" size={13} />
+                {rtl ? "إلغاء" : "Cancel"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={runOcr}
+                disabled={!filePath || working}
+                className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-accent-400 to-iris-400 px-3.5 py-1.5 text-xs font-semibold text-ink-950 shadow-[0_8px_24px_-10px_rgb(34_211_238/0.8)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {/* A single image has no between-page checkpoint, so it shows
+                    progress instead of a Cancel button that cannot answer. */}
+                <Icon
+                  name={working ? "refresh" : "scan"}
+                  size={13}
+                  className={working ? "animate-spin" : ""}
+                />
+                {working ? (rtl ? "يعمل…" : "Working…") : rtl ? "تشغيل OCR" : "Run OCR"}
+              </button>
+            )}
           </span>
         </header>
 
@@ -447,16 +501,23 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             </code>
           </div>
         )}
-        {(status.kind === "error" || status.kind === "done") && (
+        {(status.kind === "error" ||
+          status.kind === "done" ||
+          status.kind === "notice") && (
           <div
             role={status.kind === "error" ? "alert" : "status"}
             className={`mx-5 mb-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
               status.kind === "error"
                 ? "border-red-400/20 bg-red-400/[0.07] text-red-200"
-                : "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-200"
+                : status.kind === "notice"
+                  ? "border-white/10 bg-white/[0.04] text-zinc-300"
+                  : "border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-200"
             }`}
           >
-            <Icon name={status.kind === "error" ? "alert" : "check"} size={13} />
+            <Icon
+              name={status.kind === "error" ? "alert" : status.kind === "notice" ? "info" : "check"}
+              size={13}
+            />
             <span className="truncate">{status.message}</span>
           </div>
         )}

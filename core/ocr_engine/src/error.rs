@@ -21,6 +21,12 @@ pub enum OcrError {
 
     #[error("invalid input: {0}")]
     Invalid(String),
+
+    /// The caller asked the pipeline to stop between pages. Spelled exactly
+    /// `cancelled` because the shell forwards the message to the UI, which
+    /// shows a neutral notice instead of an error for this one case.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 pub type OcrResult<T> = Result<T, OcrError>;
