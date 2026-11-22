@@ -7,8 +7,15 @@
 
 import type { BatchEntryResult, BatchMatch, BatchStatus } from "./api";
 
-export type BatchFilter = "all" | "found" | "missing" | "exact" | "approximate";
-export type BatchSort = "input" | "status" | "score" | "name" | "size";
+export type BatchFilter =
+  | "all"
+  | "found"
+  | "missing"
+  | "exact"
+  | "approximate"
+  | "multiple"
+  | "error";
+export type BatchSort = "input" | "status" | "score" | "name" | "size" | "type" | "path";
 
 /** The percentage a row is ordered and filtered by: its best candidate. */
 export function bestScore(entry: BatchEntryResult): number {
@@ -29,13 +36,23 @@ export function filterEntries(
     case "found":
       return entries.filter((entry) => entry.matches.length > 0);
     case "missing":
-      return entries.filter((entry) => entry.matches.length === 0);
+      // An unsearchable entry is not a missing file: the search never ran, so
+      // it belongs in its own category rather than in the follow-up list.
+      return entries.filter(
+        (entry) => entry.matches.length === 0 && entry.status !== "error",
+      );
+    case "error":
+      return entries.filter((entry) => entry.status === "error");
     case "exact":
       return entries.filter((entry) => entry.status === "exact");
     case "approximate":
       return entries.filter(
         (entry) => entry.matches.length > 0 && entry.status !== "exact",
       );
+    case "multiple":
+      // More than one candidate at or above the threshold: the row a user has
+      // to decide about, whether or not the best one is exact.
+      return entries.filter((entry) => entry.total_matches > 1);
   }
 }
 
@@ -61,7 +78,48 @@ export function sortEntries(entries: BatchEntryResult[], sort: BatchSort): Batch
       return copy.sort(
         (a, b) => (bestMatch(b)?.size_bytes ?? -1) - (bestMatch(a)?.size_bytes ?? -1),
       );
+    case "type":
+      // A row with no match, or a matched folder, has no extension; both sort
+      // after every typed file so the list reads as a document inventory first.
+      return copy.sort((a, b) =>
+        compareOptional(
+          bestMatch(a)?.extension?.toLowerCase(),
+          bestMatch(b)?.extension?.toLowerCase(),
+        ),
+      );
+    case "path":
+      return copy.sort((a, b) =>
+        compareOptional(bestMatch(a)?.path, bestMatch(b)?.path),
+      );
   }
+}
+
+/**
+ * Narrows the table without changing the report: the minimum percentage is
+ * applied to the best score, so an entry with no match disappears as soon as
+ * the user asks for any floor above zero, and the type filter keeps only rows
+ * whose best match has that extension.
+ */
+export function refineEntries(
+  entries: BatchEntryResult[],
+  minScore: number,
+  extension: string | null,
+): BatchEntryResult[] {
+  const wanted = extension?.trim().toLowerCase() || null;
+  return entries.filter((entry) => {
+    if (bestScore(entry) < minScore) return false;
+    if (!wanted) return true;
+    const best = bestMatch(entry);
+    return best !== null && (best.extension?.toLowerCase() ?? "") === wanted;
+  });
+}
+
+/** Orders present values first, then the rows that have none. */
+function compareOptional(left: string | undefined, right: string | undefined): number {
+  if (left === undefined && right === undefined) return 0;
+  if (left === undefined) return 1;
+  if (right === undefined) return -1;
+  return left.localeCompare(right);
 }
 
 function statusRank(status: BatchStatus): number {
@@ -74,6 +132,8 @@ function statusRank(status: BatchStatus): number {
       return 2;
     case "not_found":
       return 3;
+    case "error":
+      return 4;
   }
 }
 
@@ -87,6 +147,8 @@ export function statusLabel(status: BatchStatus, rtl: boolean): string {
       return rtl ? "احتمال" : "Possible";
     case "not_found":
       return rtl ? "غير موجود" : "Not found";
+    case "error":
+      return rtl ? "خطأ في البحث" : "Search error";
   }
 }
 

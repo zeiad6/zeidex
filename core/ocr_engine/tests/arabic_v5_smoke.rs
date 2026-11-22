@@ -56,8 +56,8 @@ fn arabic_v5_lines_are_recognized() -> OcrResult<()> {
     let (_, confidence) = find("كتاب الطالب").expect("short Arabic line should be read exactly");
     assert!(confidence > 0.6, "confidence {confidence} is too low");
 
-    let (_, confidence) = find("السلام عليكم ورحمة الله")
-        .expect("v5 reads the long line in full, which v4 cannot");
+    let (_, confidence) =
+        find("السلام عليكم ورحمة الله").expect("v5 reads the long line in full, which v4 cannot");
 
     assert!(confidence > 0.6, "confidence {confidence} is too low");
 

@@ -87,7 +87,14 @@ impl ModelPaths {
         ]
         .into_iter()
         .filter(|(_, path)| !path.is_file())
-        .map(|(name, _)| name.to_string())
+        // The actual name, not the bundled one: a downloaded pack calls the
+        // detector `det.onnx`, and a message naming a file that is not part of
+        // the pack sends the user looking for the wrong thing.
+        .map(|(bundled_name, path)| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| bundled_name.to_string())
+        })
         .collect()
     }
 }

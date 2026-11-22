@@ -16,11 +16,15 @@
     "types": ["node"]
   },
   "files": [
+    "src/batch-view.ts",
+    "src/batch-view.test.ts",
     "src/documents.ts",
     "src/documents.test.ts",
     "src/index-status.ts",
     "src/index-status.test.ts",
     "src/page-range.ts",
+    "src/model-format.ts",
+    "src/model-format.test.ts",
     "src/page-range.test.ts",
     "src/settings-draft.ts",
     "src/settings-draft.test.ts",

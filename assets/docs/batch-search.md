@@ -31,8 +31,10 @@ Three doors, one list:
   again on top of what is there.
 
 The box is a plain textarea, so the system clipboard works with the normal
-shortcuts; there is no separate "paste from clipboard" button that could fail
-where <kbd>Ctrl</kbd>+<kbd>V</kbd> succeeds.
+shortcuts. A **Paste** button is there for mouse-only use: it reads the
+clipboard through the webview and, where that permission is refused, focuses
+the box and tells the user to press <kbd>Ctrl</kbd>+<kbd>V</kbd> instead — it
+never fails silently.
 
 ### What the parser does, and does not do
 
@@ -145,6 +147,7 @@ Each requested name gets a status from its best match:
 | High confidence | best score ≥ 85 |
 | Possible | best score is below 85 but at or above the threshold |
 | Not found | nothing reached the threshold |
+| Search error | the request had no searchable characters after normalization (only tatweel or diacritics), so no honest score exists; counted separately and left out of the missing-files sheet |
 
 A row expands to show every candidate, best first. Up to **8** candidates are
 returned per name, but `total_matches` reports how many actually passed — a row
@@ -157,10 +160,12 @@ found / not found / exact / fuzzy / multiple / errors and minimum percentage;
 sorting covers percentage, name, type, size and path. Results page in chunks of
 150 rows so a 2000-name paste does not build 2000 DOM trees at once.
 
-Every discovered file can be opened, revealed in its folder, or have its path
-copied, and rows can be multi-selected to copy many paths at once. Files are
-never executed by the batch screen: opening is a shell open of the file's own
-type, and everything else is a path copy.
+Every discovered file can be opened, revealed in its folder, copied by path or
+by name, and a row can be hidden from the table without re-running the search
+(a **Restore hidden** chip brings it back). Rows and their candidates are
+multi-selected for bulk copy of paths or names, bulk open, or bulk hide. Files
+are never executed by the batch screen: opening is a shell open of the file's
+own type, and everything else is a copy.
 
 File sizes are filled with a `stat` only for the matches that are returned (at
 most 8 per name), not for the whole index — the size column costs what it shows,
@@ -217,6 +222,24 @@ were measured in between). The changes, in the order they matter:
 
 The exact lookup itself is a hash map built once per batch, so a name that is
 present costs a lookup rather than a scan.
+
+A second, smaller scale check separates the three shapes of a batch against a
+100 000-file index (200 names each, release build, this machine):
+
+```bash
+cargo test --release -p zeidex-batch --test perf_batch -- --ignored --nocapture
+```
+
+| Batch | Per name | 200 names |
+| --- | --- | --- |
+| All present, 100% | 0.63 ms | 0.13 s |
+| All missing, 70% | 5.3 ms | 1.07 s |
+| One typo each, 70% | 22.5 ms | 4.5 s |
+| All missing, 50% (broad) | 21.6 ms | 4.3 s |
+
+A typo costs more than a miss because the length filter admits every
+`report_*.pdf` candidate and the banded edit distance then runs on each; the
+search still runs off the UI thread, one name per core.
 
 ## Limits, stated plainly
 

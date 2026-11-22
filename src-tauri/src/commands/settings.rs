@@ -445,8 +445,13 @@ mod integration_tests {
         let config_path = directory.join("config");
         std::fs::write(&config_path, "# hand-written comment\nfile_scan_depth=4\n")
             .expect("seed config");
-        let state = AppState::new(directory.join("zeidex.db"), directory.join("models"), None)
-            .expect("app state");
+        let state = AppState::new(
+            directory.join("zeidex.db"),
+            directory.join("models"),
+            directory.join("packs"),
+            None,
+        )
+        .expect("app state");
 
         let update = apply_patch(
             &state,
@@ -484,8 +489,13 @@ mod integration_tests {
     fn snapshot_json_matches_the_frontend_contract() {
         let directory = temp_directory("contract");
         std::fs::create_dir_all(&directory).expect("temp dir");
-        let state = AppState::new(directory.join("zeidex.db"), directory.join("models"), None)
-            .expect("app state");
+        let state = AppState::new(
+            directory.join("zeidex.db"),
+            directory.join("models"),
+            directory.join("packs"),
+            None,
+        )
+        .expect("app state");
         let snapshot = build_snapshot(
             &state,
             &RuntimeConfig::default(),
@@ -541,8 +551,13 @@ mod integration_tests {
         let config_path = directory.join("config");
         let original = "# untouched\nfile_scan_depth=4\n";
         std::fs::write(&config_path, original).expect("seed config");
-        let state = AppState::new(directory.join("zeidex.db"), directory.join("models"), None)
-            .expect("app state");
+        let state = AppState::new(
+            directory.join("zeidex.db"),
+            directory.join("models"),
+            directory.join("packs"),
+            None,
+        )
+        .expect("app state");
 
         let result = apply_patch(
             &state,

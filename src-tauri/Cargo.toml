@@ -16,6 +16,13 @@ name = "zeidex_lib"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+default = []
+# Forwarded to the OCR engine. The advisor only claims GPU acceleration when
+# the build can actually use it and a GPU was detected.
+cuda = ["zeidex-ocr/cuda"]
+directml = ["zeidex-ocr/directml"]
+
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
@@ -29,6 +36,7 @@ zeidex-batch = { path = "../core/batch" }
 zeidex-calc = { path = "../core/calc" }
 zeidex-engine = { path = "../core/engine" }
 zeidex-indexing = { path = "../core/indexing" }
+zeidex-models = { path = "../core/models" }
 zeidex-ocr = { path = "../core/ocr_engine" }
 zeidex-exporter = { path = "../core/exporter" }
 zeidex-storage = { path = "../core/storage" }
@@ -39,8 +47,10 @@ base64 = "0.22"
 dirs = "6"
 notify = "6"
 rayon = "1"
+reqwest = { version = "0.13", features = ["stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sysinfo = "0.40"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 

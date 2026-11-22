@@ -81,6 +81,145 @@ export interface ModelsStatus {
   dir: string;
   complete: boolean;
   missing: string[];
+  pack_id: string;
+  pack_name: string;
+  pack_name_ar: string;
+  bundled: boolean;
+  bundled_dir: string;
+  models_root: string;
+}
+
+export type ModelTier = "compact" | "balanced" | "precision";
+export type InstallState = "not_installed" | "partial" | "installed";
+
+export interface ModelFileView {
+  role: string;
+  name: string;
+  present: boolean;
+  expected_bytes: number;
+  actual_bytes: number;
+}
+
+/** One row of the OCR Models screen. */
+export interface ModelPackView {
+  id: string;
+  tier: ModelTier;
+  tier_label: string;
+  tier_label_ar: string;
+  name: string;
+  name_ar: string;
+  summary: string;
+  summary_ar: string;
+  ram_mb: number;
+  download_bytes: number;
+  installed_bytes: number;
+  bundled: boolean;
+  arabic: boolean;
+  english: boolean;
+  rec_ar_visual: boolean;
+  source: string;
+  license: string;
+  state: InstallState;
+  active: boolean;
+  downloading: boolean;
+  dir: string;
+  files: ModelFileView[];
+}
+
+export interface DeviceProfile {
+  cpu_model: string;
+  physical_cores: number;
+  logical_cores: number;
+  total_ram_mb: number;
+  available_ram_mb: number;
+  free_disk_mb: number;
+  os: string;
+  arch: string;
+  gpu: string | null;
+  gpu_memory_mb: number | null;
+  gpu_acceleration: boolean;
+}
+
+export type DeviceClass = "basic" | "standard" | "advanced" | "high_performance";
+
+export interface Criterion {
+  key: string;
+  label: string;
+  label_ar: string;
+  met: boolean;
+  points: number;
+  detail: string;
+}
+
+export interface Recommendation {
+  pack_id: string;
+  device_class: DeviceClass;
+  score: number;
+  reason: string;
+  reason_ar: string;
+  downgraded: boolean;
+  ocr_concurrency: number;
+  batch_chunk: number;
+  index_threads: number;
+}
+
+export interface AdvisorView {
+  profile: DeviceProfile;
+  class: DeviceClass;
+  class_label: string;
+  class_label_ar: string;
+  score: number;
+  max_score: number;
+  criteria: Criterion[];
+  recommendation: Recommendation;
+  recommended_pack: ModelPackView;
+  ram_used_percent: number;
+}
+
+export interface ModelVerifyView {
+  packId: string;
+  ok: boolean;
+  problems: string[];
+  checkedFiles: number;
+  checkedBytes: number;
+}
+
+export interface ModelSampleView {
+  name: string;
+  milliseconds: number;
+  characters: number;
+  expected_characters: number;
+  cer: number;
+  text: string;
+}
+
+export interface ModelBenchmarkView {
+  pack_id: string;
+  pack_name: string;
+  load_ms: number;
+  total_ms: number;
+  memory_mb: number;
+  samples: ModelSampleView[];
+}
+
+export type DownloadPhase =
+  | "downloading"
+  | "verifying"
+  | "installing"
+  | "done"
+  | "cancelled"
+  | "error";
+
+export interface DownloadProgress {
+  packId: string;
+  phase: DownloadPhase;
+  file: string | null;
+  fileIndex: number;
+  fileCount: number;
+  downloaded: number;
+  total: number;
+  speedBps: number;
+  message: string | null;
 }
 
 export interface PagePreview {
@@ -111,7 +250,7 @@ export type PipelineProgress =
   | { type: "page_done"; page: number; pages: number }
   | { type: "finished" };
 
-export type BatchStatus = "exact" | "high" | "possible" | "not_found";
+export type BatchStatus = "exact" | "high" | "possible" | "not_found" | "error";
 export type BatchMatchKind = "exact" | "stem" | "containment" | "tokens" | "fuzzy";
 export type BatchFileKind = "file" | "folder";
 
@@ -153,6 +292,7 @@ export interface BatchSummary {
   exact: number;
   approximate: number;
   multiple: number;
+  errors: number;
   success_percent: number;
   duration_ms: number;
 }
@@ -267,6 +407,21 @@ export const api = {
     invoke<BatchReport>("batch_search", { entries, threshold }),
   batchExport: (report: BatchReport, path: string) =>
     invoke<void>("batch_export", { report, path }),
+  modelsCatalog: () => invoke<ModelPackView[]>("models_catalog"),
+  modelsAdvisor: () => invoke<AdvisorView>("models_advisor"),
+  modelsDownload: (packId: string) =>
+    invoke<ModelPackView>("models_download", { packId }),
+  modelsCancelDownload: () => invoke<boolean>("models_cancel_download"),
+  modelsActivate: (packId: string) =>
+    invoke<ModelPackView[]>("models_activate", { packId }),
+  modelsRemove: (packId: string) =>
+    invoke<ModelPackView[]>("models_remove", { packId }),
+  modelsVerify: (packId: string) =>
+    invoke<ModelVerifyView>("models_verify", { packId }),
+  modelsBenchmark: (packId: string) =>
+    invoke<ModelBenchmarkView>("models_benchmark", { packId }),
+  onModelsProgress: (callback: (event: DownloadProgress) => void): Promise<() => void> =>
+    listen<DownloadProgress>("models-progress", (event) => callback(event.payload)),
   onOcrProgress: (callback: (event: PipelineProgress) => void) =>
     listen<PipelineProgress>("ocr-progress", (event) => callback(event.payload)),
   onIndexStatus: (callback: (status: IndexStatus) => void): Promise<() => void> =>

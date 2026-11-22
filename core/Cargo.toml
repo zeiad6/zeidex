@@ -7,6 +7,7 @@ members = [
   "exporter",
   "indexing",
   "matching",
+  "models",
   "ocr_engine",
   "ranking",
   "storage",

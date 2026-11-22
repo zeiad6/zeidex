@@ -120,6 +120,16 @@ pub struct PreviewImage {
 impl OcrEngine {
     pub fn new(config: OcrEngineConfig) -> OcrResult<Self> {
         let paths = ModelPaths::from_dir(&config.models_dir);
+        Self::with_paths(paths, config)
+    }
+
+    /// Builds an engine from explicit model paths.
+    ///
+    /// The desktop shell uses this to load a downloaded model pack: a pack
+    /// replaces detection and recognition while the layout and table models
+    /// stay shared with the bundled folder, which no single directory can
+    /// express. `config.models_dir` is ignored on this path.
+    pub fn with_paths(paths: ModelPaths, config: OcrEngineConfig) -> OcrResult<Self> {
         let models = Arc::new(onnx::load_models(&paths)?);
         let pdfium = match &config.pdfium_library {
             Some(path) => Some(Arc::new(pdf::bind_pdfium(Some(path))?)),

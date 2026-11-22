@@ -23,6 +23,11 @@ thiserror = "2"
 unicode-bidi = "0.3"
 unicode-normalization = "0.1"
 
+[dev-dependencies]
+# The pack smoke test resolves a downloaded pack through the same catalog the
+# installer writes, so the layout it exercises is the real one.
+zeidex-models = { path = "../models" }
+
 [features]
 default = []
 # Hardware acceleration is opt-in: the default build runs on CPU and loads the

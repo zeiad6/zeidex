@@ -111,6 +111,28 @@ and `ZEIDEX_PDFIUM_LIBRARY` as overrides for development and QA.
 | Settings | `~/.zeidex/config` |
 | Candidates, usage, clipboard history | SQLite, in the user data dir (`~/.local/share/zeidex` on Linux, `%APPDATA%` on Windows) |
 | ONNX models | `third_party/models` in a checkout, the user data dir once bundled |
+| Downloaded OCR packs | `<models_root>/packs/<id>/` with a verified `manifest.json`; the active pack is `active-pack.json` beside them |
+
+## Product direction
+
+The 0.1 surface is deliberately one command palette plus three focused screens
+(Document Studio, Batch Search, OCR Models). The evaluation of a wider
+"productivity platform" concluded:
+
+- **Keep the palette unified.** Apps, files, folders, commands, calculations,
+  clipboard entries and settings already share one ranked list; adding separate
+  launchers would split the ranking and the keyboard model.
+- **Add depth as screens, not plugins.** Batch Search and the model manager are
+  separate surfaces because they have their own state and reports, but they read
+  the same index and the same OCR engine.
+- **Do not ship a workflow engine yet.** Chaining arbitrary actions needs a
+  permission model, a dry-run story and a durable audit trail; none of those is
+  worth bolting onto a local launcher without a concrete user request. The
+  building blocks (indexed paths, safe `open`/`reveal`, batch reports) stay
+  available for a later design.
+- **No cloud dependency is a product invariant.** Model downloads are the only
+  network operation, they are user-initiated, and every file is pinned and
+  hashed.
 
 ## Further reading
 

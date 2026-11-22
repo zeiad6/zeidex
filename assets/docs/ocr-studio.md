@@ -124,6 +124,12 @@ At runtime the Studio reports which files are missing instead of failing
 mid-run; `ZEIDEX_MODELS_DIR` overrides the location, then the bundled resources
 are searched, then a development checkout.
 
+The bundled set is the **Lightweight** tier. The **OCR Models** screen adds two
+larger packs — a server-grade detector and a PP-OCRv5 set with the v5 Arabic
+recognizer — which replace detection and recognition while layout and table
+stay shared. Installs are downloaded, SHA-256 checked, staged and verified
+before activation. See [OCR models and the advisor](ocr-models.md).
+
 The ONNX Runtime and pdfium shared libraries are loaded dynamically. Drop them
 in `src-tauri/resources/lib/` before packaging (the bundler copies them to
 `<resources>/lib`), or point `ORT_DYLIB_PATH` / `ZEIDEX_PDFIUM_LIBRARY` at them.
@@ -138,7 +144,7 @@ in `src-tauri/resources/lib/` before packaging (the bundler copies them to
   Arabic-Indic digits (`١٢٣٤٥` → `٢٣٥`). This is a model limit, not a pipeline
   bug; replacing `ppocrv4_rec_ar.onnx` and `arabic_dict.txt` is the upgrade
   path, and the editor exists because of it.
-- **The PP-OCRv5 Arabic candidate was measured and is not the default yet.**
+- **The PP-OCRv5 Arabic recognizer is opt-in, not the default.**
   `arabic_PP-OCRv5_mobile_rec_onnx` (8 MB, Apache-2.0) was compared on the same
   renders in two typefaces, clean and degraded (blur, sensor noise, JPEG). It
   is decisively better on clean letterforms once its output is converted from
@@ -147,6 +153,8 @@ in `src-tauri/resources/lib/` before packaging (the bundler copies them to
   degraded and mixed lines the gap narrows to 0.60 against 0.65. Swapping the
   default on synthetic evidence alone would trade a known limitation for an
   unmeasured one; a labelled corpus of real Arabic scans is the missing input.
+  It ships as the Arabic recognizer of the **Advanced** pack, so a user can
+  choose it with full knowledge of the trade-off; the default stays v4.
   `arabic_smoke.rs` pins the current exact-match baseline so the regression is
   caught either way.
 - Very small text (below ~20 px) degrades both scripts, since recognition

@@ -64,9 +64,7 @@ fn is_rtl_char(ch: char) -> bool {
 fn is_ltr_char(ch: char) -> bool {
     matches!(
         unicode_bidi::bidi_class(ch),
-        unicode_bidi::BidiClass::L
-            | unicode_bidi::BidiClass::EN
-            | unicode_bidi::BidiClass::AN
+        unicode_bidi::BidiClass::L | unicode_bidi::BidiClass::EN | unicode_bidi::BidiClass::AN
     )
 }
 

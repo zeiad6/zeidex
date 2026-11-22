@@ -9,6 +9,7 @@ import {
   folderOf,
   formatBytes,
   matchKindLabel,
+  refineEntries,
   sortEntries,
   statusLabel,
   thresholdLabel,
@@ -24,7 +25,7 @@ const PAGE = 150;
 
 /** One template for the header and every row, so the columns line up. */
 const GRID =
-  "grid grid-cols-[22px_minmax(0,1.05fr)_96px_minmax(0,1.15fr)_52px_76px_70px_84px] items-center gap-2";
+  "grid grid-cols-[22px_minmax(0,1.05fr)_96px_minmax(0,1.15fr)_52px_76px_70px_112px] items-center gap-2";
 
 const FILTERS: { id: BatchFilter; label: string; rtl: string }[] = [
   { id: "all", label: "All", rtl: "الكل" },
@@ -32,6 +33,8 @@ const FILTERS: { id: BatchFilter; label: string; rtl: string }[] = [
   { id: "missing", label: "Missing", rtl: "مفقود" },
   { id: "exact", label: "Exact", rtl: "تام" },
   { id: "approximate", label: "Approximate", rtl: "تقريبي" },
+  { id: "multiple", label: "Multiple", rtl: "متعدد" },
+  { id: "error", label: "Errors", rtl: "أخطاء" },
 ];
 
 const SORTS: { id: BatchSort; label: string; rtl: string }[] = [
@@ -40,6 +43,8 @@ const SORTS: { id: BatchSort; label: string; rtl: string }[] = [
   { id: "score", label: "Match %", rtl: "نسبة التطابق" },
   { id: "name", label: "Name", rtl: "الاسم" },
   { id: "size", label: "Size", rtl: "الحجم" },
+  { id: "type", label: "File type", rtl: "نوع الملف" },
+  { id: "path", label: "Path", rtl: "المسار" },
 ];
 
 type Message = { kind: "notice" | "error"; text: string } | null;
@@ -54,8 +59,13 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
   const [message, setMessage] = useState<Message>(null);
   const [filter, setFilter] = useState<BatchFilter>("all");
   const [sort, setSort] = useState<BatchSort>("input");
+  /** A second, display-only floor: the search threshold is what matched. */
+  const [minScore, setMinScore] = useState(0);
+  const [extension, setExtension] = useState("");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  /** Requested names the user has cleared from the table without re-running. */
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const [limit, setLimit] = useState(PAGE);
   const textarea = useRef<HTMLTextAreaElement | null>(null);
 
@@ -92,8 +102,28 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
   const entries = parsed?.entries ?? [];
   const visible = useMemo(() => {
     if (!report) return [];
-    return sortEntries(filterEntries(report.entries, filter), sort);
-  }, [report, filter, sort]);
+    return sortEntries(
+      refineEntries(
+        filterEntries(report.entries, filter).filter((entry) => !hidden.has(entry.requested)),
+        minScore,
+        extension,
+      ),
+      sort,
+    );
+  }, [report, filter, sort, hidden, minScore, extension]);
+
+  /** Every extension present in the report, for the type filter. */
+  const extensions = useMemo(() => {
+    if (!report) return [];
+    const found = new Set<string>();
+    for (const entry of report.entries) {
+      for (const match of entry.matches) {
+        const ext = match.extension?.toLowerCase();
+        if (ext) found.add(ext);
+      }
+    }
+    return [...found].sort();
+  }, [report]);
 
   const run = useCallback(async () => {
     if (busy || entries.length === 0) return;
@@ -104,7 +134,10 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
       setReport(next);
       setExpanded(new Set());
       setSelected(new Set());
+      setHidden(new Set());
       setFilter("all");
+      setMinScore(0);
+      setExtension("");
       setMessage(
         next.summary.found === next.summary.total
           ? { kind: "notice", text: t("Every requested name was found.", "تم العثور على كل الأسماء المطلوبة.") }
@@ -205,6 +238,43 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
       return next;
     });
   };
+
+  /** Hides the entries that own any of these paths, and clears the selection. */
+  const hidePaths = useCallback(
+    (paths: ReadonlySet<string>) => {
+      if (!report) return;
+      const names = report.entries
+        .filter((entry) => entry.matches.some((match) => paths.has(match.path)))
+        .map((entry) => entry.requested);
+      setHidden((current) => {
+        const next = new Set(current);
+        for (const name of names) next.add(name);
+        return next;
+      });
+      setSelected(new Set());
+    },
+    [report],
+  );
+
+  const openPaths = useCallback(async (paths: string[]) => {
+    for (const path of paths) {
+      try {
+        await api.openTarget(path);
+      } catch (err) {
+        setMessage({ kind: "error", text: String(err) });
+        return;
+      }
+    }
+  }, []);
+
+  /** Filenames (not paths) of every selected match, for pasting into a mail. */
+  const selectedNames = useMemo(() => {
+    if (!report) return [];
+    return report.entries
+      .flatMap((entry) => entry.matches)
+      .filter((match) => selected.has(match.path))
+      .map((match) => match.name);
+  }, [report, selected]);
 
   const summary = report?.summary;
   const progress = summary && summary.total > 0 ? summary.success_percent : 0;
@@ -356,6 +426,37 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
                 </div>
 
                 <label className="ms-auto flex items-center gap-1.5 text-[0.65rem] text-zinc-500">
+                  {t("Type", "النوع")}
+                  <select
+                    value={extension}
+                    onChange={(event) => setExtension(event.target.value)}
+                    className="rounded-lg border border-white/10 bg-ink-900 px-2 py-1 text-[0.65rem] text-zinc-200 outline-none focus:border-accent-400/40"
+                  >
+                    <option value="">{t("All types", "كل الأنواع")}</option>
+                    {extensions.map((ext) => (
+                      <option key={ext} value={ext}>
+                        {ext}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-1.5 text-[0.65rem] text-zinc-500">
+                  {t("Show", "إظهار")}
+                  <select
+                    value={minScore}
+                    onChange={(event) => setMinScore(Number(event.target.value))}
+                    className="rounded-lg border border-white/10 bg-ink-900 px-2 py-1 text-[0.65rem] text-zinc-200 outline-none focus:border-accent-400/40"
+                  >
+                    {[0, 50, 60, 70, 80, 90, 100].map((value) => (
+                      <option key={value} value={value}>
+                        {value === 0 ? t("Any %", "أي نسبة") : `${value}%+`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-1.5 text-[0.65rem] text-zinc-500">
                   {t("Sort", "الترتيب")}
                   <select
                     value={sort}
@@ -371,18 +472,59 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
                 </label>
 
                 {selected.size > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void copy(
+                          [...selected].join("\n"),
+                          t(`Copied ${selected.size} paths.`, `نُسخ ${selected.size} مساراً.`),
+                        )
+                      }
+                      className="flex items-center gap-1 rounded-lg border border-accent-400/30 bg-accent-400/10 px-2 py-1 text-[0.65rem] text-accent-200"
+                    >
+                      <Icon name="check" size={12} />
+                      {t(`Copy ${selected.size}`, `نسخ ${selected.size}`)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void copy(
+                          selectedNames.join("\n"),
+                          t(`Copied ${selectedNames.length} names.`, `نُسخ ${selectedNames.length} اسماً.`),
+                        )
+                      }
+                      className="flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[0.65rem] text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <Icon name="text" size={12} />
+                      {t("Copy names", "نسخ الأسماء")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openPaths([...selected])}
+                      className="flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[0.65rem] text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <Icon name="file" size={12} />
+                      {t(`Open ${selected.size}`, `فتح ${selected.size}`)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => hidePaths(selected)}
+                      className="flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[0.65rem] text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <Icon name="x" size={12} />
+                      {t("Hide", "إخفاء")}
+                    </button>
+                  </>
+                )}
+                {hidden.size > 0 && (
                   <button
                     type="button"
-                    onClick={() =>
-                      void copy(
-                        [...selected].join("\n"),
-                        t(`Copied ${selected.size} paths.`, `نُسخ ${selected.size} مساراً.`),
-                      )
-                    }
-                    className="flex items-center gap-1 rounded-lg border border-accent-400/30 bg-accent-400/10 px-2 py-1 text-[0.65rem] text-accent-200"
+                    onClick={() => setHidden(new Set())}
+                    className="flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[0.65rem] text-zinc-400 transition hover:bg-white/10 hover:text-white"
                   >
-                    <Icon name="check" size={12} />
-                    {t(`Copy ${selected.size}`, `نسخ ${selected.size}`)}
+                    <Icon name="refresh" size={12} />
+                    {t(`Restore ${hidden.size} hidden`, `إرجاع ${hidden.size} مخفياً`)}
                   </button>
                 )}
               </div>
@@ -430,7 +572,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
                     <span>{t("Status", "الحالة")}</span>
                     <span>{t("Best match", "أفضل تطابق")}</span>
                     <span className="text-end">%</span>
-                    <span>{t("Type", "النوع")}</span>
+                    <span>{t("Match", "التطابق")}</span>
                     <span className="text-end">{t("Size", "الحجم")}</span>
                     <span className="text-end">{t("Actions", "إجراءات")}</span>
                   </div>
@@ -448,6 +590,8 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
                         onOpen={(path) => void api.openTarget(path).catch((err: unknown) => setMessage({ kind: "error", text: String(err) }))}
                         onReveal={(path) => void api.revealTarget(path).catch((err: unknown) => setMessage({ kind: "error", text: String(err) }))}
                         onCopy={(path) => void copy(path, t("Path copied.", "نُسخ المسار."))}
+                        onCopyName={(name) => void copy(name, t("Name copied.", "نُسخ الاسم."))}
+                        onHide={() => hidePaths(new Set([bestPathOf(entry)]))}
                       />
                     ))}
                     {visible.length > limit && (
@@ -546,6 +690,11 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
                   <Stat label={t("Exact", "تام")} value={summary.exact} />
                   <Stat label={t("Approximate", "تقريبي")} value={summary.approximate} />
                   <Stat label={t("Multiple", "متعدد")} value={summary.multiple} />
+                  <Stat
+                    label={t("Errors", "أخطاء")}
+                    value={summary.errors}
+                    tone={summary.errors > 0 ? "bad" : undefined}
+                  />
                   <Stat label={t("Total", "الإجمالي")} value={summary.total} />
                 </dl>
 
@@ -610,6 +759,11 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
+/** The path the row's actions act on: its best candidate, or empty when none. */
+function bestPathOf(entry: BatchEntryResult): string {
+  return entry.matches[0]?.path ?? "";
+}
+
 function ResultRow({
   entry,
   rtl,
@@ -620,6 +774,8 @@ function ResultRow({
   onOpen,
   onReveal,
   onCopy,
+  onCopyName,
+  onHide,
 }: {
   entry: BatchEntryResult;
   rtl: boolean;
@@ -630,6 +786,8 @@ function ResultRow({
   onOpen: (path: string) => void;
   onReveal: (path: string) => void;
   onCopy: (path: string) => void;
+  onCopyName: (name: string) => void;
+  onHide: () => void;
 }) {
   const best = bestMatch(entry);
   const score = bestScore(entry);
@@ -694,6 +852,8 @@ function ResultRow({
               <IconButton label={rtl ? "فتح" : "Open"} icon="file" onClick={() => onOpen(best.path)} />
               <IconButton label={rtl ? "إظهار المجلد" : "Show folder"} icon="folder" onClick={() => onReveal(best.path)} />
               <IconButton label={rtl ? "نسخ المسار" : "Copy path"} icon="clipboard" onClick={() => onCopy(best.path)} />
+              <IconButton label={rtl ? "نسخ الاسم" : "Copy name"} icon="text" onClick={() => onCopyName(best.name)} />
+              <IconButton label={rtl ? "إخفاء من العرض" : "Remove from view"} icon="x" onClick={onHide} />
             </>
           )}
           {entry.total_matches > 1 && (
@@ -760,6 +920,7 @@ function ResultRow({
               <IconButton label={rtl ? "فتح" : "Open"} icon="file" onClick={() => onOpen(match.path)} />
               <IconButton label={rtl ? "إظهار المجلد" : "Show folder"} icon="folder" onClick={() => onReveal(match.path)} />
               <IconButton label={rtl ? "نسخ المسار" : "Copy path"} icon="clipboard" onClick={() => onCopy(match.path)} />
+              <IconButton label={rtl ? "نسخ الاسم" : "Copy name"} icon="text" onClick={() => onCopyName(match.name)} />
             </span>
           </div>
         ))}
@@ -767,8 +928,8 @@ function ResultRow({
       {expanded && entry.matches.length > 1 && (
         <p className="px-3 pb-1.5 text-[0.58rem] text-zinc-600">
           {rtl
-            ? `${entry.total_matches} مرشحاً عند أو فوق الحد`
-            : `${entry.total_matches} candidates at or above the threshold`}
+            ? `${entry.total_matches} مرشحاً عند أو فوق الحد · ${entry.duration_ms} ms`
+            : `${entry.total_matches} candidates at or above the threshold · ${entry.duration_ms} ms`}
         </p>
       )}
     </div>
@@ -781,7 +942,7 @@ function IconButton({
   onClick,
 }: {
   label: string;
-  icon: "file" | "folder" | "clipboard";
+  icon: "file" | "folder" | "clipboard" | "text" | "x";
   onClick: () => void;
 }) {
   return (

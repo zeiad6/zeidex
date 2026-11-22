@@ -1,6 +1,7 @@
 pub mod batch;
 pub mod calc;
 pub mod clipboard;
+pub mod models;
 pub mod ocr;
 pub mod search;
 pub mod settings;

@@ -171,7 +171,8 @@ pub struct BatchMatch {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BatchEntryResult {
     pub requested: String,
-    /// `exact`, `high`, `possible` or `not_found`.
+    /// `exact`, `high`, `possible`, `not_found`, or `error` when the request
+    /// had no searchable characters.
     pub status: String,
     /// Best first, at most the requested limit.
     pub matches: Vec<BatchMatch>,
@@ -193,6 +194,11 @@ pub struct BatchSummary {
     pub approximate: usize,
     /// Entries with more than one candidate at or above the threshold.
     pub multiple: usize,
+    /// Entries that could not be searched at all: after normalization the
+    /// request had no characters left (a line of diacritics or tatweel), so no
+    /// honest score exists for it. Counted separately from "not found", which
+    /// means the search ran and the index did not contain the name.
+    pub errors: usize,
     pub success_percent: f64,
     pub duration_ms: u64,
 }
@@ -265,6 +271,10 @@ pub fn search_with_limit(
         ..BatchSummary::default()
     };
     for entry in &results {
+        if entry.status == "error" {
+            summary.errors += 1;
+            continue;
+        }
         if entry.matches.is_empty() {
             summary.not_found += 1;
             continue;
@@ -311,18 +321,24 @@ fn search_one(
         duration_ms: 0,
     };
 
-    if let Some(query) = Query::new(requested) {
-        let mut found = index.exact(&query, files);
-        if found.is_empty() {
-            found = fuzzy_matches(files, &query, threshold);
+    match Query::new(requested) {
+        Some(query) => {
+            let mut found = index.exact(&query, files);
+            if found.is_empty() {
+                found = fuzzy_matches(files, &query, threshold);
+            }
+            result.total_matches = found.len();
+            found.truncate(limit);
+            for entry in &mut found {
+                entry.size_bytes = size_of(&entry.path, entry.kind);
+            }
+            result.status = status_of(found.first()).to_string();
+            result.matches = found;
         }
-        result.total_matches = found.len();
-        found.truncate(limit);
-        for entry in &mut found {
-            entry.size_bytes = size_of(&entry.path, entry.kind);
-        }
-        result.status = status_of(found.first()).to_string();
-        result.matches = found;
+        // Nothing survived normalization, so there is nothing to compare. This
+        // is reported as an error rather than as "not found": the index was
+        // never the reason the name did not match.
+        None => result.status = "error".to_string(),
     }
 
     result.duration_ms = started.elapsed().as_millis() as u64;
@@ -812,12 +828,38 @@ mod tests {
         assert_eq!(report.summary.not_found, 1);
         assert_eq!(report.summary.exact, 1);
         assert_eq!(report.summary.success_percent, 50.0);
+        assert_eq!(
+            report.summary.total,
+            report.summary.found + report.summary.not_found + report.summary.errors
+        );
     }
 
     #[test]
-    fn an_empty_request_is_not_found_rather_than_everything() {
+    fn a_request_with_no_searchable_characters_is_an_error_not_a_miss() {
+        // Tatweel is decorative and is dropped by normalization, so nothing is
+        // left to compare. Reporting it as "not found" would blame the index.
+        let report = search(
+            &files(&["a.pdf"]),
+            &["\u{0640}\u{0640}".to_string(), "a.pdf".to_string()],
+            50,
+        );
+        assert_eq!(entry(&report, "\u{0640}\u{0640}").status, "error");
+        assert!(entry(&report, "\u{0640}\u{0640}").matches.is_empty());
+        assert_eq!(report.summary.errors, 1);
+        assert_eq!(report.summary.not_found, 0);
+        assert_eq!(report.summary.found, 1);
+        assert_eq!(report.summary.total, 2);
+    }
+
+    #[test]
+    fn a_blank_request_is_an_error_rather_than_everything() {
+        // A blank line has no name to compare, so it must not be scored as a
+        // miss against the index; the parser drops such lines, and a direct
+        // caller gets the same answer.
         let report = search(&files(&["a.pdf"]), &["   ".to_string()], 50);
-        assert_eq!(entry(&report, "   ").status, "not_found");
+        assert_eq!(entry(&report, "   ").status, "error");
+        assert_eq!(report.summary.errors, 1);
+        assert!(entry(&report, "   ").matches.is_empty());
     }
 
     /// The textbook full-matrix distance, used only to check the banded one.

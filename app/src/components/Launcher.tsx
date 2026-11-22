@@ -83,6 +83,7 @@ export default function Launcher({
   onToggleRtl,
   onOpenOcr,
   onOpenBatch,
+  onOpenModels,
   onOpenSettings,
 }: {
   rtl: boolean;
@@ -90,6 +91,7 @@ export default function Launcher({
   onToggleRtl: () => void;
   onOpenOcr: () => void;
   onOpenBatch: () => void;
+  onOpenModels: () => void;
   onOpenSettings: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -383,6 +385,15 @@ export default function Launcher({
             >
               <Icon name="table" size={13} />
               {rtl ? "البحث الدفعي" : "Batch Search"}
+            </button>
+            <button
+              type="button"
+              onClick={onOpenModels}
+              aria-label={rtl ? "نماذج OCR" : "OCR Models"}
+              title={rtl ? "نماذج OCR" : "OCR Models"}
+              className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-zinc-400 transition hover:bg-iris-400/10 hover:text-iris-400"
+            >
+              <Icon name="cpu" size={14} />
             </button>
             <button
               type="button"

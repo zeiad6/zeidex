@@ -95,9 +95,7 @@ fn indexed_files(state: &State<'_, AppState>) -> Result<Vec<BatchFile>, String> 
             .store
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        store
-            .load_indexed_paths()
-            .map_err(|err| err.to_string())?
+        store.load_indexed_paths().map_err(|err| err.to_string())?
     };
     Ok(rows
         .into_iter()

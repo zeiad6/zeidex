@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod error;
+mod hardware;
 mod index_service;
 mod index_watch;
 pub mod state;
@@ -29,8 +30,14 @@ pub fn run() -> anyhow::Result<()> {
             let db_path = state::resolve_db_path();
             state::prepare_onnx_runtime(app.handle());
             let models_dir = state::resolve_models_dir(app.handle());
+            let models_root = state::resolve_models_root();
             let pdfium_library = state::resolve_pdfium_library(app.handle());
-            app.manage(AppState::new(db_path, models_dir, pdfium_library)?);
+            app.manage(AppState::new(
+                db_path,
+                models_dir,
+                models_root,
+                pdfium_library,
+            )?);
             // Every index write goes through this worker: the startup walk,
             // the filesystem watcher, and the Reindex button. Managing it here,
             // before any command can run, means no caller ever sees a missing
@@ -119,6 +126,14 @@ pub fn run() -> anyhow::Result<()> {
             commands::system::db_path,
             commands::system::config_path,
             commands::system::app_version,
+            commands::models::models_catalog,
+            commands::models::models_advisor,
+            commands::models::models_download,
+            commands::models::models_cancel_download,
+            commands::models::models_activate,
+            commands::models::models_remove,
+            commands::models::models_verify,
+            commands::models::models_benchmark,
             commands::settings::settings_snapshot,
             commands::settings::settings_update,
             commands::translate::translate_text,

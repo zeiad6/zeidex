@@ -1,8 +1,10 @@
 import type { PageResult } from "../api";
 import { DEMO_LIST, parseList, searchBatch } from "./batch";
 import {
+  ADVISOR,
   CLIPS,
   MODELS,
+  MODEL_PACKS,
   RESULTS,
   SAMPLE_PAGE,
   SAMPLE_PREVIEW,
@@ -27,6 +29,10 @@ export function installMock() {
   let nextCallback = 1;
   let clipboardPaused = false;
   let clips = CLIPS.slice();
+  // The Models screen mutates its catalog; a demo visit should not leak that
+  // state into the next one, so it is copied once per install.
+  let demoPacks = MODEL_PACKS.map((pack) => ({ ...pack, files: pack.files.map((file) => ({ ...file })) }));
+  let demoActive = "ppocrv4-mobile";
   // The PDF run a Cancel click would stop, if one is in flight.
   let pdfRun: { cancelled: boolean } | null = null;
 
@@ -114,6 +120,131 @@ export function installMock() {
       case "clipboard_clear":
         clips = [];
         return CLIPS.length;
+      case "models_catalog":
+        return demoPacks;
+      case "models_advisor":
+        return ADVISOR;
+      case "models_download": {
+        const id = String(args.packId ?? "");
+        const pack = demoPacks.find((entry) => entry.id === id);
+        if (!pack) throw `unknown model pack: ${id}`;
+        const total = pack.download_bytes;
+        const file = pack.files[0]?.name ?? null;
+        for (const fraction of [0.08, 0.34, 0.61, 0.88]) {
+          await delay(240);
+          emit("models-progress", {
+            packId: id,
+            phase: "downloading",
+            file,
+            fileIndex: 1,
+            fileCount: pack.files.length,
+            downloaded: Math.round(total * fraction),
+            total,
+            speedBps: 4_600_000,
+            message: null,
+          });
+        }
+        for (const phase of ["verifying", "installing"] as const) {
+          emit("models-progress", {
+            packId: id,
+            phase,
+            file,
+            fileIndex: pack.files.length,
+            fileCount: pack.files.length,
+            downloaded: total,
+            total,
+            speedBps: 0,
+            message: null,
+          });
+          await delay(320);
+        }
+        demoPacks = demoPacks.map((entry) =>
+          entry.id === id
+            ? {
+                ...entry,
+                state: "installed",
+                installed_bytes: total,
+                files: entry.files.map((item) => ({
+                  ...item,
+                  present: true,
+                  actual_bytes: item.expected_bytes,
+                })),
+              }
+            : entry,
+        );
+        emit("models-progress", {
+          packId: id,
+          phase: "done",
+          file: null,
+          fileIndex: pack.files.length,
+          fileCount: pack.files.length,
+          downloaded: total,
+          total,
+          speedBps: 0,
+          message: null,
+        });
+        return demoPacks.find((entry) => entry.id === id);
+      }
+      case "models_cancel_download":
+        return true;
+      case "models_activate": {
+        demoActive = String(args.packId ?? demoActive);
+        demoPacks = demoPacks.map((entry) => ({ ...entry, active: entry.id === demoActive }));
+        return demoPacks;
+      }
+      case "models_remove": {
+        const id = String(args.packId ?? "");
+        demoPacks = demoPacks.map((entry) =>
+          entry.id === id
+            ? { ...entry, state: "not_installed", installed_bytes: 0, active: false }
+            : entry,
+        );
+        if (demoActive === id) demoActive = "ppocrv4-mobile";
+        demoPacks = demoPacks.map((entry) => ({ ...entry, active: entry.id === demoActive }));
+        return demoPacks;
+      }
+      case "models_verify": {
+        const id = String(args.packId ?? "");
+        const pack = demoPacks.find((entry) => entry.id === id);
+        return {
+          packId: id,
+          ok: true,
+          problems: [],
+          checkedFiles: pack?.files.length ?? 0,
+          checkedBytes: pack?.installed_bytes ?? 0,
+        };
+      }
+      case "models_benchmark": {
+        const id = String(args.packId ?? "");
+        const pack = demoPacks.find((entry) => entry.id === id);
+        if (!pack) throw `unknown model pack: ${id}`;
+        await delay(900);
+        return {
+          pack_id: id,
+          pack_name: pack.name,
+          load_ms: pack.bundled ? 240 : 410,
+          total_ms: pack.bundled ? 1_240 : 1_680,
+          memory_mb: pack.ram_mb,
+          samples: [
+            {
+              name: "english",
+              milliseconds: 380,
+              characters: 52,
+              expected_characters: 53,
+              cer: 0.019,
+              text: "Zeidex reads documents offline. Invoice 2024 total: 1250.00 USD.",
+            },
+            {
+              name: "arabic",
+              milliseconds: 520,
+              characters: 48,
+              expected_characters: 49,
+              cer: 0.041,
+              text: "زايدكس يقرأ المستندات دون اتصال بالإنترنت. الفاتورة رقم 2024.",
+            },
+          ],
+        };
+      }
       case "ocr_models_status":
         return MODELS;
       case "ocr_page_preview":

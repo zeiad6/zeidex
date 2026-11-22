@@ -13,6 +13,14 @@ pub struct ModelsStatus {
     pub dir: String,
     pub complete: bool,
     pub missing: Vec<String>,
+    /// The pack the next OCR run will load. A downloaded pack replaces the
+    /// bundled detection and recognition models; layout and table stay shared.
+    pub pack_id: &'static str,
+    pub pack_name: &'static str,
+    pub pack_name_ar: &'static str,
+    pub bundled: bool,
+    pub bundled_dir: String,
+    pub models_root: String,
 }
 
 /// A page rendered for the Studio's preview pane.
@@ -83,15 +91,27 @@ pub fn export_xlsx_pages(pages: Vec<PageResult>, path: String) -> Result<(), Str
         .map_err(|err| err.to_string())
 }
 
-/// Which model files are present, so the OCR Studio can show a clear message
-/// instead of a runtime error when the user has not run `fetch_models.sh`.
+/// Which model files the active pack needs, so the OCR Studio can show a clear
+/// message instead of a runtime error when a pack is incomplete.
 #[tauri::command(async)]
 pub fn ocr_models_status(state: State<'_, AppState>) -> Result<ModelsStatus, String> {
-    let paths = zeidex_ocr::onnx::ModelPaths::from_dir(&state.models_dir);
+    let pack = state.active_pack();
+    let paths = state.ocr_paths();
+    let dir = paths
+        .det
+        .parent()
+        .map(|parent| parent.to_string_lossy().into_owned())
+        .unwrap_or_default();
     Ok(ModelsStatus {
-        dir: state.models_dir.to_string_lossy().into_owned(),
+        dir,
         complete: paths.is_complete(),
         missing: paths.missing(),
+        pack_id: pack.id,
+        pack_name: pack.name,
+        pack_name_ar: pack.name_ar,
+        bundled: pack.bundled,
+        bundled_dir: state.models_dir.to_string_lossy().into_owned(),
+        models_root: state.models_root.to_string_lossy().into_owned(),
     })
 }
 

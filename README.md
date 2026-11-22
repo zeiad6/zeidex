@@ -219,12 +219,30 @@ Paste, import a `.txt`, or type; the parser splits on newlines and tabs (commas
 are legal in filenames), folds duplicates after normalization, and shows what it
 accepted before anything runs. A slider sets the match threshold from 50% to
 100%, and 100% means equality after normalization — nothing fuzzy can reach it.
-Results expand per name with file actions and multi-select, and **Export Excel**
-writes a four-sheet report: summary with a chart, a filterable results table,
-missing names, and every candidate for names that matched more than once.
+Results expand per name with file actions and multi-select; a second, display-only
+filter narrows by file type and minimum score without re-running the search, and
+every row can be opened, shown in its folder, copied by path or by name, or hidden
+from the table. **Export Excel** writes a four-sheet report: summary with a chart,
+a filterable results table, missing names, and every candidate for names that
+matched more than once.
 
 See [how the matching works](assets/docs/batch-search.md) for the score table,
 the Arabic folding rules, and the measured performance.
+
+### OCR models and the hardware advisor
+
+The installer ships one small OCR set; **OCR Models** adds two larger tiers and
+lets you switch between them. The advisor reads this machine — CPU model, cores,
+RAM, GPU, free disk — classifies it as Basic, Standard, Advanced or High
+performance against published criteria, and recommends the tier that fits, with
+the reason and the trade-offs. Downloads are opt-in, resumable, checked against
+a published SHA-256, staged, verified again, and only then activated; a failed
+download leaves the working pack alone. **Test** and **Compare models** run the
+bundled sample pages on demand and report character error rate and time, so no
+speed or accuracy claim is made before it is measured here.
+
+See [OCR models and the advisor](assets/docs/ocr-models.md) for the tiers, the
+storage layout, the scoring table and the failure modes.
 
 ### Privacy
 
@@ -234,7 +252,7 @@ the Arabic folding rules, and the measured performance.
 | Network calls in translation | Google `gtx` endpoint, only when you use `tr"` |
 | Telemetry, crash reporting, analytics | **none** |
 | Files read | only the ones you index or open |
-| Model downloads | one-time, by `scripts/fetch_models.sh`, checksum-verified |
+| Model downloads | opt-in, from pinned upstream revisions, SHA-256 verified (`scripts/fetch_models.sh` or the Models screen) |
 
 The database — search index, clipboard history, usage history — lives in your platform's
 data directory: `~/.local/share/zeidex` on Linux, `~/Library/Application Support/zeidex` on
@@ -411,6 +429,9 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - [x] Batch Search: a pasted or imported list of names, a 50–100% match
       threshold, expandable results with file actions, and a four-sheet Excel
       report — [how it matches](assets/docs/batch-search.md)
+- [x] Three OCR tiers, a resumable and SHA-256-verified model manager, and a
+      hardware advisor that recommends a tier with its reason —
+      [the models](assets/docs/ocr-models.md)
 - [ ] Signed installers for macOS, Windows and Linux
 - [ ] Plugin API for custom result providers
 
@@ -419,6 +440,7 @@ why the OCR and export logic can be tested in CI on two operating systems.
 - [Architecture](assets/docs/architecture.md) — how the shell, the core and the frontend fit together
 - [Rust core](assets/docs/core.md) — crates, search pipeline, OCR internals
 - [OCR Studio](assets/docs/ocr-studio.md) — the document workbench, pane by pane
+- [OCR models and the advisor](assets/docs/ocr-models.md) — the three tiers, install rules, hardware classification
 - [Batch Search](assets/docs/batch-search.md) — a list of names, what the threshold means, and the Excel report
 - [Build and release](assets/docs/build-and-release.md) — requirements, targets, checks, bundling
 

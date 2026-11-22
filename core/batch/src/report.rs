@@ -181,6 +181,7 @@ fn status_format(status: &str, on_zebra: bool) -> Format {
         "exact" => GOOD,
         "high" => WARN,
         "not_found" => BAD,
+        "error" => BAD,
         _ => MUTED,
     };
     let base = if on_zebra { zebra() } else { cell() };
@@ -232,7 +233,7 @@ fn write_summary(
         ("Exact matches", summary.exact as f64, "#,##0"),
         ("Approximate matches", summary.approximate as f64, "#,##0"),
         ("Multiple-match cases", summary.multiple as f64, "#,##0"),
-        ("Errors", 0.0, "#,##0"),
+        ("Errors", summary.errors as f64, "#,##0"),
         ("Success rate", summary.success_percent / 100.0, "0.0%"),
         (
             "Matching threshold",
@@ -312,7 +313,7 @@ fn write_summary(
     sheet.set_landscape();
     sheet.set_print_scale(85);
     sheet.set_margins(0.5, 0.5, 0.6, 0.6, 0.3, 0.3);
-    sheet.set_footer("Zeidex · Batch Search · &[Page] / &[Pages]");
+    sheet.set_footer("&CZeidex · Batch Search · &P / &N");
 
     Ok(())
 }
@@ -359,7 +360,7 @@ fn write_results(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<(
     sheet.set_print_scale(55);
     sheet.set_repeat_rows(0, 0)?;
     sheet.set_print_area(0, 0, last_row, RESULT_HEADERS.len() as u16 - 1)?;
-    sheet.set_footer("Zeidex · Batch Search · &[Page] / &[Pages]");
+    sheet.set_footer("&CZeidex · Batch Search · &P / &N");
     Ok(())
 }
 
@@ -440,11 +441,15 @@ fn status_label(status: &str) -> &'static str {
         "exact" => "Exact",
         "high" => "High confidence",
         "possible" => "Possible",
+        "error" => "Error",
         _ => "Not found",
     }
 }
 
 fn note_for(entry: &BatchEntryResult, matched: Option<&BatchMatch>) -> String {
+    if entry.status == "error" {
+        return "No searchable characters: the name is empty after normalization.".to_string();
+    }
     if entry.matches.is_empty() {
         return "No file at or above the threshold.".to_string();
     }
@@ -487,7 +492,10 @@ fn write_missing(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<(
     for entry in report
         .entries
         .iter()
-        .filter(|entry| entry.matches.is_empty())
+        // An entry with no searchable characters is not a missing file: it was
+        // never searched, and listing it here would send the user looking for a
+        // name the index could never have matched.
+        .filter(|entry| entry.matches.is_empty() && entry.status != "error")
     {
         let striped = row.is_multiple_of(2);
         let text = if striped { zebra() } else { cell() };
@@ -514,7 +522,7 @@ fn write_missing(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<(
     }
     sheet.set_landscape();
     sheet.set_print_scale(90);
-    sheet.set_footer("Zeidex · Batch Search · &[Page] / &[Pages]");
+    sheet.set_footer("&CZeidex · Batch Search · &P / &N");
     Ok(())
 }
 
@@ -588,7 +596,7 @@ fn write_multiple(workbook: &mut Workbook, report: &BatchReport) -> BatchResult<
     sheet.set_landscape();
     sheet.set_print_scale(75);
     sheet.set_repeat_rows(0, 0)?;
-    sheet.set_footer("Zeidex · Batch Search · &[Page] / &[Pages]");
+    sheet.set_footer("&CZeidex · Batch Search · &P / &N");
     Ok(())
 }
 
@@ -686,6 +694,19 @@ mod tests {
         assert_eq!(stamp(1_700_000_000), "2023-11-14 22:13");
         // A leap day, to catch an off-by-one in the civil algorithm.
         assert_eq!(stamp(1_709_164_800), "2024-02-29 00:00");
+    }
+
+    #[test]
+    fn an_unsearchable_entry_is_labelled_and_explained() {
+        let entry = BatchEntryResult {
+            requested: "\u{0640}".to_string(),
+            status: "error".to_string(),
+            matches: Vec::new(),
+            total_matches: 0,
+            duration_ms: 1,
+        };
+        assert_eq!(status_label(&entry.status), "Error");
+        assert!(note_for(&entry, None).contains("No searchable characters"));
     }
 
     #[test]

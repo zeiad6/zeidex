@@ -4,8 +4,17 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 use zeidex_engine::QueryEngine;
+use zeidex_models::ModelPack;
 use zeidex_ocr::OcrEngine;
 use zeidex_storage::SqliteStore;
+
+/// One in-flight model download. Downloads are serialised: two packs writing
+/// staging folders at once would compete for the same disk and the same
+/// progress channel, and the UI has no use for that.
+pub struct ModelDownload {
+    pub pack_id: String,
+    pub cancel: Arc<AtomicBool>,
+}
 
 /// Shared shell state. Both fields are behind a mutex because Tauri commands run
 /// on the async runtime while the indexing engine is synchronous and CPU-bound.
@@ -34,7 +43,14 @@ pub struct AppState {
     /// token is compared by pointer when a run ends: a command that finished
     /// late must not clear the run that replaced it.
     pub ocr_run: Mutex<Option<Arc<AtomicBool>>>,
+    /// The bundled model folder: shipped with the installer, read-only in a
+    /// packaged app.
     pub models_dir: PathBuf,
+    /// The writable model folder: downloaded packs and the active-pack marker
+    /// live here.
+    pub models_root: PathBuf,
+    /// The download that currently owns the progress channel, if any.
+    pub model_download: Mutex<Option<ModelDownload>>,
     pub pdfium_library: Option<PathBuf>,
     pub db_path: PathBuf,
 }
@@ -43,6 +59,7 @@ impl AppState {
     pub fn new(
         db_path: PathBuf,
         models_dir: PathBuf,
+        models_root: PathBuf,
         pdfium_library: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
         // A corrupt database file used to abort startup entirely. Recovery keeps
@@ -82,6 +99,8 @@ impl AppState {
             ocr: Mutex::new(None),
             ocr_run: Mutex::new(None),
             models_dir,
+            models_root,
+            model_download: Mutex::new(None),
             pdfium_library,
             db_path,
         })
@@ -146,14 +165,119 @@ impl AppState {
         if let Some(engine) = guard.as_ref() {
             return Ok(engine.clone());
         }
-        let engine = std::sync::Arc::new(OcrEngine::new(zeidex_ocr::OcrEngineConfig {
-            models_dir: self.models_dir.clone(),
-            pdfium_library: self.pdfium_library.clone(),
-            dpi: 300.0,
-            ..Default::default()
-        })?);
+        let engine = std::sync::Arc::new(OcrEngine::with_paths(
+            self.ocr_paths(),
+            zeidex_ocr::OcrEngineConfig {
+                models_dir: self.models_dir.clone(),
+                pdfium_library: self.pdfium_library.clone(),
+                dpi: 300.0,
+                ..Default::default()
+            },
+        )?);
         *guard = Some(engine.clone());
         Ok(engine)
+    }
+
+    /// The pack the next engine load should use.
+    ///
+    /// A marker naming an unknown pack, or one whose files have disappeared,
+    /// falls back to the bundled set: a stale preference must not turn OCR off.
+    pub fn active_pack(&self) -> &'static ModelPack {
+        zeidex_models::active_pack(&self.models_root)
+            .and_then(|id| zeidex_models::pack(&id))
+            .filter(|pack| {
+                pack.bundled || zeidex_models::status(&self.models_root, pack).is_installed()
+            })
+            .unwrap_or_else(zeidex_models::default_pack)
+    }
+
+    /// Model paths for the active pack. Detection and recognition come from the
+    /// pack; layout and table stay shared with the bundled folder.
+    pub fn ocr_paths(&self) -> zeidex_ocr::onnx::ModelPaths {
+        self.ocr_paths_for(self.active_pack())
+    }
+
+    /// Model paths for one specific pack, active or not. The benchmark uses
+    /// this to test a pack before the user commits to it.
+    pub fn ocr_paths_for(&self, pack: &ModelPack) -> zeidex_ocr::onnx::ModelPaths {
+        let pack_paths = zeidex_models::pack_paths(&self.models_dir, &self.models_root, pack);
+        let mut paths = zeidex_ocr::onnx::ModelPaths::from_dir(&self.models_dir);
+        paths.det = pack_paths.det;
+        paths.rec_en = pack_paths.rec_en;
+        paths.rec_ar = pack_paths.rec_ar;
+        paths.dict_en = pack_paths.dict_en;
+        paths.dict_ar = pack_paths.dict_ar;
+        paths.rec_ar_visual = pack_paths.rec_ar_visual;
+        paths
+    }
+
+    /// Drops the cached engine so the next run loads the newly active pack.
+    /// A run already holding an `Arc` finishes on the model it started with.
+    pub fn reset_ocr_engine(&self) {
+        let mut guard = self
+            .ocr
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = None;
+    }
+
+    /// Claims the download slot. Returns the token the downloader checks.
+    pub fn begin_model_download(&self, pack_id: &str) -> Result<Arc<AtomicBool>, String> {
+        let mut guard = self
+            .model_download
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(current) = guard.as_ref() {
+            return Err(format!(
+                "{} is still downloading; cancel it before starting another",
+                current.pack_id
+            ));
+        }
+        let token = Arc::new(AtomicBool::new(false));
+        *guard = Some(ModelDownload {
+            pack_id: pack_id.to_string(),
+            cancel: token.clone(),
+        });
+        Ok(token)
+    }
+
+    /// Releases the slot for `token`, leaving a newer download alone.
+    pub fn end_model_download(&self, token: &Arc<AtomicBool>) {
+        let mut guard = self
+            .model_download
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(&current.cancel, token))
+        {
+            *guard = None;
+        }
+    }
+
+    /// Asks the live download to stop. Returns whether one was live.
+    pub fn cancel_model_download(&self) -> bool {
+        let guard = self
+            .model_download
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match guard.as_ref() {
+            Some(current) => {
+                current.cancel.store(true, Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The pack id of the live download, for the UI to show a spinner on the
+    /// right card after a remount.
+    pub fn downloading_pack(&self) -> Option<String> {
+        let guard = self
+            .model_download
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.as_ref().map(|current| current.pack_id.clone())
     }
 }
 
@@ -209,6 +333,21 @@ pub fn resolve_models_dir(app: &tauri::AppHandle) -> PathBuf {
 
 fn looks_like_model_dir(dir: &Path) -> bool {
     dir.join("ppocrv4_det.onnx").is_file()
+}
+
+/// Where downloaded packs live. Always writable and per-user: the bundled
+/// folder may be a read-only package path.
+///
+/// `$ZEIDEX_MODELS_ROOT` wins, so a test or a portable install can redirect it.
+pub fn resolve_models_root() -> PathBuf {
+    if let Some(dir) = std::env::var_os("ZEIDEX_MODELS_ROOT") {
+        let dir = PathBuf::from(dir);
+        if !dir.as_os_str().is_empty() {
+            return dir;
+        }
+    }
+    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.join("zeidex").join("models")
 }
 
 /// Optional path to a pdfium shared library, looked up in the bundle, next to the
@@ -278,8 +417,13 @@ mod tests {
             std::env::temp_dir().join(format!("zeidex-state-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("temp dir");
-        let state = AppState::new(directory.join("zeidex.db"), directory.join("models"), None)
-            .expect("state");
+        let state = AppState::new(
+            directory.join("zeidex.db"),
+            directory.join("models"),
+            directory.join("packs"),
+            None,
+        )
+        .expect("state");
         (directory, state)
     }
 
@@ -296,6 +440,57 @@ mod tests {
         assert!(token.load(std::sync::atomic::Ordering::Relaxed));
         state.end_ocr_run(&token);
         assert!(!state.cancel_ocr_run(), "the slot is empty again");
+        drop(state);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    /// The engine must load the files of the active pack, and only believe an
+    /// active marker when that pack is actually installed. A marker left behind
+    /// by a pack the user removed would otherwise make OCR load missing files.
+    #[test]
+    fn an_active_pack_decides_which_model_files_a_run_uses() {
+        let (directory, state) = test_state("active-pack");
+        let bundled = zeidex_models::pack("ppocrv4-mobile").expect("bundled pack");
+        assert_eq!(
+            state.active_pack().id,
+            bundled.id,
+            "with no marker the bundled pack is the default"
+        );
+
+        let det = bundled
+            .files
+            .iter()
+            .find(|file| file.role == zeidex_models::FileRole::Det)
+            .expect("the bundled pack has a detection model");
+        assert_eq!(
+            state.ocr_paths().det,
+            state.models_dir.join(det.name),
+            "a bundled run reads detection from the bundled folder"
+        );
+
+        // A marker naming a pack that is not installed is ignored: the shell
+        // falls back instead of pointing the engine at an empty folder.
+        std::fs::create_dir_all(&state.models_root).expect("models root");
+        std::fs::write(
+            state.models_root.join(zeidex_models::ACTIVE),
+            br#"{"pack_id":"ppocrv5-server"}"#,
+        )
+        .expect("marker");
+        assert_eq!(
+            state.active_pack().id,
+            bundled.id,
+            "an uninstalled pack must not become active"
+        );
+
+        // Activating the bundled pack explicitly records it, and the resolved
+        // paths stay the bundled ones.
+        zeidex_models::set_active(&state.models_root, bundled).expect("activate bundled");
+        assert_eq!(
+            zeidex_models::active_pack(&state.models_root).as_deref(),
+            Some(bundled.id)
+        );
+        assert_eq!(state.ocr_paths().det, state.models_dir.join(det.name));
+
         drop(state);
         let _ = std::fs::remove_dir_all(directory);
     }
