@@ -32,6 +32,14 @@ pub struct ModelPaths {
     /// Structure-token class list for the table model. Optional: when absent the
     /// built-in PP-StructureV2 list is used, so an older model folder still runs.
     pub table_dict: PathBuf,
+    /// True when the Arabic recognizer emits glyphs in visual (page) order
+    /// rather than logical order. PP-OCRv4 emits logical order; the v5 mobile
+    /// Arabic recognizer emits visual order, which [`crate::bidi::visual_to_logical`]
+    /// converts back. Declared per model instead of guessed per line: a line
+    /// cannot tell you which convention its recognizer used.
+    pub rec_ar_visual: bool,
+    /// Same flag for the Latin recognizer.
+    pub rec_en_visual: bool,
 }
 
 impl ModelPaths {
@@ -46,7 +54,17 @@ impl ModelPaths {
             layout: dir.join("ppstructurev2_layout.onnx"),
             table: dir.join("slanet_table.onnx"),
             table_dict: dir.join("table_structure_dict.txt"),
+            rec_ar_visual: false,
+            rec_en_visual: false,
         }
+    }
+
+    /// Marks the Arabic recognizer as visual-order. Used when a pack selects a
+    /// v5 Arabic recognizer; `from_dir` describes the v4 layout, which is
+    /// logical-order.
+    pub fn with_visual_arabic(mut self) -> Self {
+        self.rec_ar_visual = true;
+        self
     }
 
     /// True when every file the pipeline needs is present. The engine refuses to
@@ -86,6 +104,9 @@ pub struct ModelSet {
     pub dict_en: Dictionary,
     pub dict_ar: Dictionary,
     pub table_dict: StructureDict,
+    /// Output order of each recognizer; see [`ModelPaths::rec_ar_visual`].
+    pub rec_en_visual: bool,
+    pub rec_ar_visual: bool,
 }
 
 /// Execution-provider fallback: CUDA, then DirectML, then CPU. The GPU features
@@ -133,6 +154,8 @@ pub fn load_models(paths: &ModelPaths) -> OcrResult<ModelSet> {
         table: Mutex::new(table),
         dict_en: Dictionary::load(&paths.dict_en)?,
         dict_ar: Dictionary::load(&paths.dict_ar)?,
+        rec_en_visual: paths.rec_en_visual,
+        rec_ar_visual: paths.rec_ar_visual,
         // A missing structure dictionary is not fatal: the built-in list is the
         // same 28 PP-StructureV2 fragments the export was trained with.
         table_dict: StructureDict::load(&paths.table_dict)
@@ -388,6 +411,16 @@ pub fn recognize_line(
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         recognize_with(&mut session, &models.dict_ar, image, line)?
+    };
+    let text_en = if models.rec_en_visual {
+        bidi::visual_to_logical(&text_en)
+    } else {
+        text_en
+    };
+    let text_ar = if models.rec_ar_visual {
+        bidi::visual_to_logical(&text_ar)
+    } else {
+        text_ar
     };
     Ok(choose_recognition((text_en, score_en), (text_ar, score_ar)))
 }
