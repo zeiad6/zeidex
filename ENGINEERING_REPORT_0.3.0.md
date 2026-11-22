@@ -31,12 +31,14 @@ login.
 | UI | RTL base direction for Arabic file names in lists; format chips | Screenshots |
 | Name matching | Exact / start / end / inside / partial / close tiers, typo tolerant | 26 new core tests, 5 node tests, release-mode latency bench |
 | Naming | Product renamed **Zeidex Search**, repository `zeidex-search`, package names follow | Source, config, AppStream, workflow and assets updated; binary/identifier/data path unchanged |
+| Packaging | `.deb` built, installed, and launched under Xvfb; AppStream validates | `zeidex-search 0.3.0` arm64, `/usr/bin/zeidex`, desktop entry and metainfo present |
+| Repository | Failing dependency PRs closed, their branches removed, incompatible ranges ignored; duplicate draft release deleted | `gh pr list` empty, only `main` on the remote, one release |
 
 105 files changed in one commit — 81 modified and 24 new (`FileGlyph.tsx`,
 `WindowControls.tsx`, `file-format.ts`, `match-kind.ts` and their tests,
 `autostart.rs`, `shortcut.rs`, the Arabic corpus and PDF fixtures, six
 screenshots, the latency benchmark, the 0.2.0 and 0.3.0 reports and these notes)
-— 5865 insertions and 267 deletions.
+— 5866 insertions and 267 deletions.
 
 ### A1. The rename, and what it does not touch
 
@@ -351,10 +353,35 @@ Close in one list.
 | `dpkg -i` the package | first attempt over the installed 0.1.0 failed with `trying to overwrite '/usr/bin/zeidex', which is also in package zeidex-studio` — the documented upgrade path; after `dpkg -r zeidex-studio` it installed as `zeidex-search 0.3.0`, with `/usr/bin/zeidex`, `/usr/lib/Zeidex Search/{lib,models}`, the desktop entry and the metainfo in place |
 | `timeout 12 xvfb-run -a /usr/bin/zeidex` (installed package) | exit 124 — the process was still running when the timeout fired; only `libEGL … DRI3` warnings from a GPU-less X server |
 | `appstreamcli validate --no-net` | ✔ Validation was successful |
+| `tauri build --bundles appimage` (aarch64, this host) | **not completed** — the linuxdeploy step blocked in `poll` with no CPU for 10+ minutes and was killed; the x86_64 AppImage is built by the workflow and was inspected (I1) |
 
 The whole table was re-run after the rename, not carried over: the counts above
 are the post-rename run (the ignored three are the two batch scale checks and
 the latency benchmark, all opt-in).
+
+### I1. The workflow's own artifacts
+
+Run [45082848860](https://github.com/zeiad6/zeidex-search/actions/runs/45082848860)
+on commit `6b453ab` finished **success**: both the Windows and the Linux bundle
+jobs, every step green. Its artifacts were downloaded here with `gh run download`
+and inspected, not assumed:
+
+| Artifact | Size (bytes) | SHA-256 |
+| --- | --- | --- |
+| `Zeidex Search_0.3.0_amd64.AppImage` | 132,545,016 | `6cba11c6bb850133bb1eac891ea0dec23d5c884421c56a0bb9dde047f7fa98b8` |
+| `Zeidex Search_0.3.0_amd64.deb` | 51,180,538 | `ef0eaae53683187820b5c00c73879e80a87babcec46a6da7737a6a4643490049` |
+| `Zeidex Search_0.3.0_x64_en-US.msi` | 50,769,920 | `67713344233d4da6290e93c1a2ce9c93664e5f857b6b7bdf743573ea2a21cbda` |
+| `Zeidex Search_0.3.0_x64-setup.exe` | 45,672,010 | `b0f811764d1236f70a5174db03796eed256c7e1739e9645cc108641b432b5b89` |
+
+`dpkg-deb -I` on the CI deb reports `Package: zeidex-search`, `Version: 0.3.0`,
+`Architecture: amd64`, `Installed-Size: 91398` and the same three dependencies as
+the local arm64 build. `msiinfo export` on the MSI reports `ProductName Zeidex
+Search`, `ProductVersion 0.3.0`, `Manufacturer Zeidexsoft` and `UpgradeCode
+{B072E07D-FE23-58F7-AB41-51544D8EE5D1}`; its template is `x64`. `file` calls the
+NSIS setup a `PE32 executable … (GUI)`, the subsystem that keeps a console from
+opening, and the AppImage an `ELF 64-bit LSB pie executable, x86-64`. The Windows
+binaries were built and packaged but not executed — this host cannot run them.
+
 
 Environment for the real-model runs:
 
@@ -420,3 +447,17 @@ the demo answers the same Tauri commands the shell does, including the new
    from the product name, so 0.3.0 installs beside an existing *Zeidex Studio*
    rather than replacing it. User data in `~/.zeidex` is untouched by either
    path, and both instructions are in the release notes.
+10. **The aarch64 AppImage was not produced on this host.** `tauri build
+    --bundles appimage` finished the binary and reached the linuxdeploy step,
+    which then blocked in `do_sys_poll` with one second of CPU over ten minutes
+    and was killed. The `.deb` from the same build installs and runs; the x86_64
+    AppImage built by the workflow was downloaded and inspected (I1).
+11. **Three dependency groups are deliberately not upgraded.** Dependabot opened
+    grouped PRs that move `sha2` 0.10 → 0.11, `rusqlite` 0.42 → 0.43, `base64`
+    0.22 → 0.23, `dirs` 6 → 7, `notify` 6 → 8, `vite` 6 → 8,
+    `@vitejs/plugin-react` 4 → 6 and `typescript` 5 → 7 in one step. The first
+    group fails to compile (`sha2` 0.11's digest no longer implements `LowerHex`)
+    and the others change public APIs or build configuration. Each is a migration
+    with its own test run, not a version bump, so the three PRs were closed and
+    the incompatible ranges are ignored in `.github/dependabot.yml` until the
+    migration is done. Patch releases inside the verified lines still arrive.

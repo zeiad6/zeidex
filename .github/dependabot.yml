@@ -24,6 +24,17 @@ updates:
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-patch"
+      # The 0.3.0 release is verified against sha2 0.10 and rusqlite 0.42.
+      # sha2 0.11 replaces generic-array with hybrid-array (the digest no
+      # longer implements LowerHex) and rusqlite 0.43 is a 0.x API break;
+      # both need their own migration and test run. Remove an entry when
+      # that migration lands.
+      - dependency-name: "sha2"
+        versions:
+          - ">=0.11.0"
+      - dependency-name: "rusqlite"
+        versions:
+          - ">=0.43.0"
 
   - package-ecosystem: "cargo"
     directory: "/src-tauri"
@@ -49,6 +60,18 @@ updates:
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-patch"
+      # base64 0.23, dirs 7 and notify 8 change their public APIs; the
+      # shell is verified against 0.22 / 6 / 6. Remove an entry when the
+      # corresponding migration lands.
+      - dependency-name: "base64"
+        versions:
+          - ">=0.23.0"
+      - dependency-name: "dirs"
+        versions:
+          - ">=7.0.0"
+      - dependency-name: "notify"
+        versions:
+          - ">=7.0.0"
 
   - package-ecosystem: "npm"
     directory: "/app"
@@ -76,3 +99,16 @@ updates:
       - "dependencies"
       - "frontend"
     target-branch: "main"
+    ignore:
+      # Vite 8, @vitejs/plugin-react 6 and TypeScript 7 change their
+      # config/API surfaces; the app builds with Vite 6, plugin-react 4
+      # and TypeScript 5. Remove an entry when the migration lands.
+      - dependency-name: "vite"
+        versions:
+          - ">=7.0.0"
+      - dependency-name: "@vitejs/plugin-react"
+        versions:
+          - ">=5.0.0"
+      - dependency-name: "typescript"
+        versions:
+          - ">=6.0.0"
