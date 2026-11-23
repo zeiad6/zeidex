@@ -326,6 +326,39 @@ ocr:     ZEIDEX_TEST_MODELS_DIR=third_party/models \
            over 167 characters, 29 words
 ```
 
+### H0. Remote gates (GitHub Actions, not this machine)
+
+- `CI` run **45224501716** on `21b3f72`: 5/5 jobs green — Rust core on
+  ubuntu-latest **and windows-latest**, OCR real-model tests, desktop shell on
+  Ubuntu **and windows-latest**. The Windows jobs compile the crate and run the
+  81 shell unit tests on a Windows runner; they do not launch the GUI.
+- `CI` run **45229536705** on `64a7f0c` (the release commit): 5/5 jobs green,
+  same matrix.
+- `Release` run **45229479585** on tag `v0.4.0`: both bundle jobs succeeded and
+  produced the artifacts in I1.
+
+### H1. Measured performance (this build)
+
+`tools/perf/query_engine_bench`, release profile, against a real index of
+**5,081 candidates** produced by the release binary under Xvfb (243 apps, 3,490
+files, 1,348 folders):
+
+| Query | p50 | p95 |
+| --- | --- | --- |
+| empty (browse) | 0.08 ms | 0.08 ms |
+| `sa` | 1.22 ms | 1.26 ms |
+| `net` | 1.28 ms | 1.32 ms |
+| `doc` | 1.16 ms | 1.20 ms |
+| `visual` | 1.47 ms | 1.50 ms |
+| `privacy security` | 2.28 ms | 2.37 ms |
+| `a"safari` (apps filter) | 0.08 ms | 0.09 ms |
+| `f"note` (files filter) | 1.43 ms | 1.46 ms |
+| `d"down` (folders filter) | 0.32 ms | 0.33 ms |
+
+Loading that index from SQLite takes 2.81 s (1,808 candidates/s). The 0.3.0
+report measured 24–46 ms p50 at 50,000 candidates; this table is the smaller,
+real index, not a synthetic one, and the query path did not change in 0.4.0.
+
 The frontend gate is not a formality: `contrast.test.ts` scans every component
 for text tokens and fails on an undeclared colour (it caught `zinc-700` in this
 pass), and `organizer-view.test.ts` now scans the Rust crate for warning codes.
@@ -345,6 +378,27 @@ through the demo bridge in headless Chrome — the same harness the earlier
 screenshots used.
 
 ---
+
+## I1. Release artifacts
+
+Tag `v0.4.0` (commit `64a7f0c`) was built by the `Release` workflow on GitHub
+runners — Windows on `windows-latest`, Linux on `ubuntu-22.04` — and the four
+artifacts were downloaded here and inspected. The release is a **draft**: the
+workflow creates it that way so a human publishes it.
+
+| Asset | Size | SHA-256 | Inspected |
+| --- | --- | --- | --- |
+| `Zeidex.Search_0.4.0_x64_en-US.msi` | 50,913,280 B | `ec9921b0c7577d574a6774dbac9dc5bd393ae2a5b1607496e6a8c2fc229056db` | `msiinfo export File`: `zeidex.exe` 21,766,656 B **version 0.4.0.0**, `onnxruntime.dll` 1.30.0.909, `pdfium.dll` 160.0.8165.0, five models and their dicts; `msiextract` produced a **PE32+ x86-64 GUI** executable |
+| `Zeidex.Search_0.4.0_x64-setup.exe` | 45,837,069 B | `07fc918c48d3e9a15337744badf054112c78a7f87328e34b9764f7ac61ed2488` | `7z l`: NSIS-3 Unicode, includes `modern-wizard.bmp` (the project's own branding), `zeidex.exe` PE32+ x86-64, both DLLs and the model pack |
+| `Zeidex.Search_0.4.0_amd64.deb` | 51,605,678 B | `f468685aebc6f9e40dfb86ff6b34155665ed29ab4c9202959d42bd3f0d122404` | `dpkg-deb -I`: version 0.4.0, amd64, depends on WebKitGTK 4.1/GTK3/appindicator; ships `usr/bin/zeidex`, both libraries, desktop file and icons |
+| `Zeidex.Search_0.4.0_amd64.AppImage` | 133,040,632 B | `85bbaa4ac96662d9c05b9a25b65c4afb0a8f1abbbd2423776a3e0c77a43223e4` | `7z l`: 418 files, including `usr/bin/zeidex`, both libraries and the five ONNX models |
+
+What this proves: the Windows build compiles, links and packages on a real
+Windows runner, and the installer payload is a valid 64-bit Windows GUI binary
+with its runtime libraries and models. What it does **not** prove: that the
+installer runs, that the window is opaque on a real desktop, or that the
+uninstaller leaves the machine clean. No Windows machine was available here, and
+none of the packages was installed on this host.
 
 ## J. Not verified here, stated plainly
 

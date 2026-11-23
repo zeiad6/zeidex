@@ -480,13 +480,12 @@ working until the new one verifies.
 | **Linux (x86_64)** | `Zeidex Search_0.4.0_amd64.AppImage` | Any distribution; no installation, no root. |
 | **Linux (arm64)** | `Zeidex Search_0.4.0_arm64.deb` | Raspberry Pi 4/5 and ARM laptops on Debian 12+ or Ubuntu 22.04+. |
 
-> Sizes and SHA-256 hashes are attached to the GitHub release by the workflow
-> that builds each artifact from this commit; this file does not guess them.
-> The Windows packages are built on GitHub's Windows runners — they were **not**
-> built or run in the Linux environment that produced this commit (see
-> `ENGINEERING_REPORT_0.4.0.md` § J). Remove a previously installed
-> *Zeidex Studio* before installing this release — see
-> [Known limitations](#known-limitations).
+> These packages were built by the `Release` workflow on GitHub runners from
+> this commit; their sizes and SHA-256 hashes are recorded in
+> `ENGINEERING_REPORT_0.4.0.md` § I1 and in the `SHA256SUMS` asset. The Windows
+> packages were **not** installed or run in the Linux environment that produced
+> this commit (see § J). Remove a previously installed *Zeidex Studio* before
+> installing this release — see [Known limitations](#known-limitations).
 
 > The x64 packages are produced on GitHub's native runners from the release
 > commit, so every artifact matches the source behind this release. The arm64
