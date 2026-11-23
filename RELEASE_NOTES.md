@@ -88,6 +88,11 @@ The Windows runtime, the MSI/NSIS installers and GPU acceleration were **not**
 exercised in the environment that produced this commit. They are listed in
 `ENGINEERING_REPORT_0.4.0.md` § J with the reason, not described as done.
 
+The Arabic recognizer was also put to a direct A/B: the bundled PP-OCRv4 model
+scored CER 0.60 % / WER 3.45 % on the labelled corpus, the PP-OCRv5 candidate
+4.19 % / 17.24 %. The default therefore stays PP-OCRv4; the harness is
+`core/ocr_engine/tests/arabic_recognizer_ab.rs` (§ I2).
+
 ---
 
 ## What's new in 0.3.0
@@ -581,13 +586,13 @@ sha256sum "Zeidex Search_0.4.0_amd64.AppImage"
 ## Known limitations
 
 - **Arabic recognition** is usable but not perfect: dense lines can lose
-  characters and Arabic-Indic digits are not read reliably yet. The Precision
-  tier uses
-  [PP-OCRv5 Arabic](https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx),
-  which reads clean letterforms noticeably better once its visual-order output is
-  converted, but digit runs and mixed Latin text stay weak. It is an optional
-  download rather than the default because it has not been measured against a
-  labelled corpus of real scans.
+  characters and Arabic-Indic digits are not read reliably yet. The default
+  Arabic recognizer is PP-OCRv4. The optional Precision tier ships
+  [PP-OCRv5 Arabic](https://huggingface.co/itextresearch/itext-arabic_PP-OCRv5_mobile_rec_infer),
+  and it was measured against the default on the labelled corpus: **CER 4.19 %
+  against 0.60 %**, WER 17.24 % against 3.45 %. It is therefore not the default.
+  That corpus is rendered text, not photographed scans, so the comparison is a
+  gate rather than a verdict — see `ENGINEERING_REPORT_0.4.0.md` § I2.
 - **`.doc` and `.ppt` are refused, not read** — both are binary OLE formats whose
   text lives in compressed streams. `.docx`, `.xlsx`, `.odt` and legacy encoded
   text are supported.

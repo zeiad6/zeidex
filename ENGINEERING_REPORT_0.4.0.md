@@ -400,12 +400,59 @@ installer runs, that the window is opaque on a real desktop, or that the
 uninstaller leaves the machine clean. No Windows machine was available here, and
 none of the packages was installed on this host.
 
+## I2. The Arabic recognizer: measured, not adopted
+
+The question was whether the bundled Arabic recognizer should be replaced by a
+newer one. The catalog already carries the candidate: pack `ppocrv5-server`
+pairs the PP-OCRv5 server detector with
+`itextresearch/itext-arabic_PP-OCRv5_mobile_rec_infer`. Both of its files were
+downloaded here and matched the hashes pinned in `core/models/src/catalog.rs`:
+the model `916385d3…` at 8,025,038 B, and the extracted 747-character
+dictionary `7f92f7db…` at 2,369 B.
+
+The comparison is fair by construction: the candidate's own config declares
+`image_shape: [3, 48, 320]`, which is what `REC_TARGET_HEIGHT = 48` in
+`core/ocr_engine/src/onnx.rs` already feeds every recognizer, and the candidate
+was loaded with `with_visual_arabic()` because v5 exports are visual-order while
+the bundled v4 export is logical-order.
+
+`core/ocr_engine/tests/arabic_recognizer_ab.rs` runs both recognizers over the
+labelled corpus and prints the two rates and their difference. It skips unless
+`ZEIDEX_TEST_MODELS_DIR` and `ZEIDEX_TEST_AR_MODELS_DIR` are both set, so a
+normal `cargo test` is unaffected.
+
+| Recognizer | CER | WER | Lines read |
+| --- | --- | --- | --- |
+| Bundled PP-OCRv4 Arabic | **0.60 %** | **3.45 %** | 10/10 |
+| PP-OCRv5 Arabic (candidate) | 4.19 % | 17.24 % | 10/10 |
+| Difference | +3.59 pp | +13.79 pp | — |
+
+**Decision: not adopted.** The candidate is worse on the only labelled Arabic
+corpus in the repository, by a margin far outside noise (one line of ten is
+enough to move CER by whole points, and the gap is 7× on characters). The
+default pack stays `ppocrv4-mobile`; `ppocrv5-server` remains a selectable pack
+for documents that differ from this corpus.
+
+What this measurement cannot settle: the corpus is *rendered* text — 10 lines,
+44 px, one font per line, no perspective, blur, shadow or phone-camera noise.
+It measures recognition on clean glyphs. A switch would have to be justified on
+photographed Arabic documents with ground truth, and no such corpus exists in
+this repository yet. The harness is written so that adding one is a directory
+and an environment variable, not a rewrite.
+
+Handwriting is a separate wall. PP-OCRv4 is trained on print; no amount of
+deskew, denoise or thresholding turns cursive handwriting into print, so
+handwriting support requires a recognizer trained for it plus a labelled
+handwriting corpus to prove the gain. Neither was attempted, and no UI claims
+it.
+
 ## J. Not verified here, stated plainly
 
 | Item | Status | Why |
 | --- | --- | --- |
 | Windows runtime (opaque window, DPI, multi-monitor, tray, dialogs) | **Not verified** | No Windows machine or WebView2 in this environment |
 | MSI / NSIS build, install, upgrade, uninstall | **Not built** | No Windows target, no WiX/NSIS toolchain |
+| Handwriting recognition | **Not implemented** | PP-OCRv4 is print-trained; the v5 Arabic candidate measured worse on the labelled corpus (§ I2), and no handwriting-trained recognizer or labelled handwriting corpus exists here |
 | PDF export | **Not implemented** | No Arabic-shaping PDF writer; pdfium is read-only |
 | GPU acceleration | **Not implemented** | ONNX Runtime CPU build ships; a GPU toggle without a GPU EP would be a lie |
 | Arabic CER on this exact build | **Re-measured** | `arabic_cer`: aggregate CER 0.60 %, WER 3.45 %, search-CER 0.60 % over 167 characters and 29 words; the gate (`MAX_CER 0.08`, `MAX_WER 0.15`) passes |
