@@ -138,9 +138,10 @@ export default function DataIntelligence({
   }, [analyze, profile]);
 
   // Focus lands inside the panel when it opens, so a keyboard user is not left
-  // tabbing through the studio behind it.
+  // tabbing through the studio behind it. `preventScroll` keeps the overlay's
+  // own position untouched in a short window.
   useEffect(() => {
-    panelRef.current?.focus();
+    panelRef.current?.focus({ preventScroll: true });
   }, []);
 
   const subject = subjectForTab(tab);

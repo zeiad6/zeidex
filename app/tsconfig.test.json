@@ -32,6 +32,7 @@
     "src/match-kind.ts",
     "src/match-kind.test.ts",
     "src/index-status.test.ts",
+    "src/layout-invariants.test.ts",
     "src/page-range.ts",
     "src/model-format.ts",
     "src/model-format.test.ts",

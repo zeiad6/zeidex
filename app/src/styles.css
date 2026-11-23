@@ -192,7 +192,10 @@ html[data-os="windows"] .panel {
 .panel {
   position: relative;
   isolation: isolate;
-  overflow: hidden;
+  /* `clip`, not `hidden`: a hidden panel is still a scroll container, and
+     focusing a control near its edge scrolls it sideways — which moved the
+     Data intelligence overlay off-screen at the 520 px minimum width. */
+  overflow: clip;
   border-radius: 22px;
   border: 1px solid rgb(255 255 255 / 0.09);
   background:

@@ -379,7 +379,7 @@ export default function Launcher({
 
   return (
     <div className="window-shell flex h-full items-start justify-center bg-transparent px-4 pt-[10vh]">
-      <div className="panel flex w-[min(780px,94vw)] flex-col">
+      <div className="panel flex max-h-full w-[min(780px,94vw)] flex-col">
         <header
           className="launcher-header relative flex items-center gap-4 px-5 pb-3 pt-4"
           data-tauri-drag-region
