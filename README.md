@@ -279,6 +279,11 @@ What it guarantees:
 - **One page, one row.** A stack of ID cards keeps its order. A page that produced no
   fields keeps an empty row instead of letting the next card move up, and a repeated
   national number is reported with both page numbers rather than dropped.
+- **Every document type, not only the eight with a fixed profile.** A form, a letter or
+  an unclassified page keeps each labeled pair it contains as its own column — the
+  labels the document actually uses, in first-seen order, flagged for review. The batch
+  table builds those columns from the pages themselves, so a stack of forms still comes
+  out as a table.
 - **The profile is yours to correct.** Picking a document type re-runs the extraction
   with that profile — for the single document *and* the batch table, so the two cannot
   disagree.

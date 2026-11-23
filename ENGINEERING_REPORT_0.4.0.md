@@ -33,11 +33,11 @@ from the Studio without leaving the window.
 
 | Area | Change | Verified here |
 | --- | --- | --- |
-| Document profiles | 11 document types, each with its own ordered field spec and Arabic/English aliases | 17 extraction tests, 12 organizer lib tests |
+| Document profiles | 11 document types; eight ordered field specs plus label-driven columns for the rest | 18 extraction tests, 12 organizer lib tests |
 | ID cards | Name + national number columns, Egyptian and Saudi identifier shapes, unlabeled cards extracted but flagged | Tests `an_arabic_id_card_is_read_into_named_fields`, `an_unlabeled_card_is_extracted_but_flagged` |
 | Batch | One page = one row, page order preserved, blank page keeps its slot, duplicate identifiers reported with both pages | `a_batch_of_id_cards_keeps_one_row_per_card_in_page_order`, `a_blank_card_keeps_its_row_instead_of_shifting_the_rest`, `a_repeated_identifier_is_reported_with_both_pages` |
 | Profile override | A manual document type applies to the single document *and* every batch row | `a_manual_profile_applies_to_every_batch_row`, shell `a_manual_profile_reaches_the_batch_table` |
-| Panel | Fields / Batch / Organized / JSON / CSV / Markdown, editable cells, undo, warning strip, review counter | 100 frontend tests, axe 0 violations, 3 screenshots |
+| Panel | Fields / Batch / Organized / JSON / CSV / Markdown, editable cells, undo, warning strip, review counter | 102 frontend tests, axe 0 violations, 3 screenshots, usable at 520×360 |
 | Export | TXT, CSV, JSON, Markdown, HTML from one block list through the Rust save dialog | 12 shell organizer tests incl. `a_preview_matches_the_exported_body` |
 | Defects | Two unlabeled warning codes, a mislabeled batch column, 12 clippy warnings, a missing batch override, a demo bridge gap | Fixed and tested in this pass (section G) |
 | Version | 0.4.0 across workspace, shell, Tauri config, npm package and lockfile | `grep`, release build |
@@ -46,13 +46,13 @@ Gates, all re-run after the last edit:
 
 | Gate | Result |
 | --- | --- |
-| `cargo test --workspace` (core) | **619 passed**, 0 failed, 2 ignored |
+| `cargo test --workspace` (core) | **620 passed**, 0 failed, 2 ignored |
 | `cargo test --lib` (shell) | **81 passed**, 0 failed |
-| `npm test` (frontend) | **100 passed**, 0 failed |
+| `npm test` (frontend) | **102 passed**, 0 failed |
 | Core clippy (`-D unwrap_used -D expect_used`) | 0 errors, **0 warnings** |
 | Shell clippy (`-D warnings -D unwrap_used -D expect_used`) | 0 errors |
 | `cargo fmt --check` (core and shell) | clean |
-| Frontend build | 429.95 kB JS / 75.32 kB CSS (gzip 126.02 / 13.37) |
+| Frontend build | 429.98 kB JS / 75.63 kB CSS (gzip 126.04 / 13.45) |
 | Release binary | built in 7m08s, launches under Xvfb |
 | Arabic OCR gate | CER **0.60 %**, WER **3.45 %** on the 0.4.0 build (167 chars, 29 words) |
 
@@ -89,9 +89,13 @@ Each has an ordered field list. For example:
 | Bank statement | account holder, account number, IBAN, statement date, opening balance, closing balance |
 | Business card | full name, job title, company, phone, email, website, address |
 
-`form`, `table` and `unknown` intentionally have **no** profile: they carry the
-text, not a claim about fields. An extraction with no fields returns the
-`no_fields` warning and the organized view still has everything.
+`form`, `table` and `unknown` intentionally have **no** fixed profile: they
+carry the text, not a claim about fields. They are not left empty either — every
+labeled pair the page contains is kept as a `custom:<label>` field, appended
+after the profile fields in first-seen order and flagged for review. A stack of
+forms therefore gets one column per label it actually uses, and the batch table
+builds those columns from the pages themselves. An extraction with no fields at
+all returns the `no_fields` warning and the organized view still has everything.
 
 ### B2. Detection
 
@@ -103,6 +107,12 @@ ties by the presence of identifier shapes:
 - A card with an identifier but no readable title is still detected as an ID
   card and every field is flagged for review — the test
   `an_unlabeled_card_is_extracted_but_flagged` asserts exactly that.
+- A page with three or more labeled pairs and no stronger keyword evidence is a
+  form. Three pairs is the floor: the score is 0.5 per pair, so 1.5 clears the
+  detector's evidence threshold exactly (it used to score 1.35 and fall through
+  to Unknown).
+- A table with no keyword evidence is a table (`has_table`), and everything else
+  is Unknown rather than a guess.
 
 Detection is folded (`fold`) before matching, so `بطاقة تحقيق الشخصية` matches
 regardless of alef form, and `ID CARD` matches `id card`.
@@ -207,13 +217,18 @@ one has no English and Arabic label. That test is why `national_id_missing` and
 - axe-core 4.10.2, WCAG 2.0/2.1/2.2 A+AA, against the whole document with the
   panel open: **0 violations** in dark English, dark Arabic and light English.
 
-### D6. RTL and themes
+### D6. RTL, themes, and the 520×360 minimum
 
 The panel uses logical utilities (`ms-`, `me-`, `text-start`, `text-end`), and
 the screenshots in `assets/screenshots/data-intelligence-*.png` are the real
 component at 1440×960 in dark LTR, dark RTL and light LTR. In RTL the page
 column moves to the right, the confidence column to the left, and `dir="auto"`
 on every value cell keeps `2026-014` readable inside Arabic text.
+
+At the 520×360 minimum window the panel is fully usable: the tab strip fits, the
+field table scrolls vertically, the footer keeps every export button, and the
+document is exactly 520×360. That measurement is what exposed the scroll defect
+in G — the overlay had opened 25 px off the left edge with its first column cut.
 
 ---
 
@@ -273,6 +288,9 @@ Seven commands are registered: `organize_pages`, `extract_document`,
 | 12 clippy warnings in the organizer (collapsible `if`, manual char comparison, manual range) | A shipped crate should not carry noise | `cargo clippy --fix`, formatted, 0 warnings |
 | `extract_document_batch` had no profile argument | Correcting the document type fixed the fields view and left the table wrong | Added `profile`, `extract_batch_as`, and two tests |
 | Demo bridge answered `null` to every organizer command | The panel could not be reviewed or audited in a browser | Dev-only fixtures in `app/src/demo/organizer.ts`, imported lazily and never in a release build |
+| `.panel` used `overflow: hidden`, so opening the panel scrolled the studio 38 px sideways and the overlay started 25 px off-screen at 520 px width | The first table column and every tab label were cut at the minimum window size | `overflow: clip` (not a scroll container) + `focus({ preventScroll: true })`; `layout-invariants.test.ts` pins both |
+| The launcher panel had no height bound: at 360 px tall the document grew to 605 px | The whole window scrolled, title bar included | `max-h-full` on the panel; the results list scrolls in 113 px instead |
+| A form with three labeled pairs was never detected: 3 × 0.45 = 1.35 fell under the 1.5 evidence floor, so the Form branch was dead code | "Form" existed in the enum and the profile picker but auto-detection could not reach it | 0.5 per pair (3 × 0.5 clears the floor exactly); `a_batch_without_a_fixed_profile_builds_columns_from_its_own_labels` covers detection, column order and per-page alignment |
 | Version still 0.3.0 in five files | A release that lies about its version | 0.4.0 in workspace, shell, `tauri.conf.json`, `package.json`, lockfile |
 
 ---
@@ -281,7 +299,7 @@ Seven commands are registered: `organize_pages`, `extract_document`,
 
 ```text
 core:    cargo test --workspace --manifest-path core/Cargo.toml --offline
-         → 619 passed, 0 failed, 2 ignored
+         → 620 passed, 0 failed, 2 ignored
          cargo clippy --workspace --lib ... -D clippy::unwrap_used -D clippy::expect_used
          → 0 errors, 0 warnings
          cargo fmt --all -- --check → clean
@@ -292,7 +310,7 @@ shell:   cargo test --lib --manifest-path src-tauri/Cargo.toml --offline
          → 0 errors
          cargo fmt --all -- --check → clean
 
-front:   npm test → 100 passed, 0 failed
+front:   npm test → 102 passed, 0 failed
          npx tsc --noEmit → clean
          npm run build → 429.95 kB JS, 75.32 kB CSS
 

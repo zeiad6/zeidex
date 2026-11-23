@@ -1195,7 +1195,10 @@ pub fn detect_kind(blocks: &[&Block]) -> (DocumentKind, f32) {
     }
 
     if key_values >= 3 {
-        let form_score = (key_values as f32 * 0.45).min(3.0);
+        // 0.5, not 0.45: three labeled pairs is the definition of a form, and
+        // 3 × 0.45 = 1.35 fell under the 1.5 evidence floor below — a three-field
+        // form was detected as Unknown. 3 × 0.5 clears the floor exactly.
+        let form_score = (key_values as f32 * 0.5).min(3.0);
         if form_score > best.1 {
             best = (DocumentKind::Form, form_score);
         }

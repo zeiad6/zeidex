@@ -463,3 +463,49 @@ fn a_continuation_line_stays_with_its_single_label() {
 
     assert_eq!(value(&extraction, "address"), "15 Nile Street\nCairo");
 }
+
+#[test]
+fn a_batch_without_a_fixed_profile_builds_columns_from_its_own_labels() {
+    // A form has no field spec, so the only honest columns are the labels the
+    // pages actually carry — and they must still line up per page.
+    let document = organize(&SourceDocument {
+        pages: vec![
+            page(vec![
+                SourceBlock::titled("نموذج طلب"),
+                SourceBlock::text("Payment terms: 30 days"),
+                SourceBlock::text("Project code: ZX-9"),
+                SourceBlock::text("Applicant: Ahmed"),
+            ]),
+            page(vec![
+                SourceBlock::titled("نموذج طلب"),
+                SourceBlock::text("Payment terms: 45 days"),
+                SourceBlock::text("Delivery point: Cairo"),
+                SourceBlock::text("Applicant: Mona"),
+            ]),
+        ],
+    });
+    let batch = extract_batch(&document);
+
+    assert_eq!(batch.kind, DocumentKind::Form);
+    let keys: Vec<&str> = batch
+        .columns
+        .iter()
+        .map(|column| column.key.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        vec![
+            "custom:payment_terms",
+            "custom:project_code",
+            "custom:applicant",
+            "custom:delivery_point",
+        ]
+    );
+
+    assert_eq!(batch.rows.len(), 2);
+    assert_eq!(batch.rows[0].page, 0);
+    assert_eq!(batch.rows[0].values, vec!["30 days", "ZX-9", "Ahmed", ""]);
+    assert_eq!(batch.rows[1].page, 1);
+    assert_eq!(batch.rows[1].values, vec!["45 days", "", "Mona", "Cairo"]);
+    assert!(batch.rows.iter().all(|row| row.needs_review));
+}

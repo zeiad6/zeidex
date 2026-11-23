@@ -73,9 +73,9 @@ Arabic, and a PDF that breaks Arabic is worse than no button.
 
 | Gate | Result |
 | --- | --- |
-| Core tests | 619 passed |
+| Core tests | 620 passed |
 | Shell tests | 81 passed |
-| Frontend tests | 100 passed |
+| Frontend tests | 102 passed |
 | Clippy + rustfmt | clean, 0 warnings |
 | Arabic OCR corpus | CER 0.60 %, WER 3.45 % |
 | Accessibility (axe-core 4.10.2) | 0 violations, panel open, dark/RTL/light |
