@@ -291,6 +291,7 @@ Seven commands are registered: `organize_pages`, `extract_document`,
 | `.panel` used `overflow: hidden`, so opening the panel scrolled the studio 38 px sideways and the overlay started 25 px off-screen at 520 px width | The first table column and every tab label were cut at the minimum window size | `overflow: clip` (not a scroll container) + `focus({ preventScroll: true })`; `layout-invariants.test.ts` pins both |
 | The launcher panel had no height bound: at 360 px tall the document grew to 605 px | The whole window scrolled, title bar included | `max-h-full` on the panel; the results list scrolls in 113 px instead |
 | A form with three labeled pairs was never detected: 3 × 0.45 = 1.35 fell under the 1.5 evidence floor, so the Form branch was dead code | "Form" existed in the enum and the profile picker but auto-detection could not reach it | 0.5 per pair (3 × 0.5 clears the floor exactly); `a_batch_without_a_fixed_profile_builds_columns_from_its_own_labels` covers detection, column order and per-page alignment |
+| Google's throttling answer (HTTP 200 + an HTML apology page) was reported as `translate_parse_failed` | A rate-limited user was told the response was unparseable, which points at the wrong cause | `looks_like_html` routes it to `translate_rate_limited`; the test uses the same apology prefix |
 | Version still 0.3.0 in five files | A release that lies about its version | 0.4.0 in workspace, shell, `tauri.conf.json`, `package.json`, lockfile |
 
 ---
@@ -355,6 +356,7 @@ screenshots used.
 | GPU acceleration | **Not implemented** | ONNX Runtime CPU build ships; a GPU toggle without a GPU EP would be a lie |
 | Arabic CER on this exact build | **Re-measured** | `arabic_cer`: aggregate CER 0.60 %, WER 3.45 %, search-CER 0.60 % over 167 characters and 29 words; the gate (`MAX_CER 0.08`, `MAX_WER 0.15`) passes |
 | WebKitGTK pixels under Xvfb | **Black** | WebKitGTK 2.52.6 paints nothing under Xvfb; UI pixels were verified in Chrome instead |
+| Translation service reachable from here | **Blocked** | On 2026-11-23 the keyless `gtx` endpoint answered this network with Google's HTML apology page (tested with the app's own URL and user agent). The app now reports `translate_rate_limited` and returns no text; it does not fabricate a translation. The feature is a `tr"` launcher panel (four targets), not a full studio |
 
 Everything in this table is a limit of the environment or of the shipped
 binaries, not a task that was silently skipped.

@@ -68,6 +68,9 @@ Arabic, and a PDF that breaks Arabic is worse than no button.
 - The demo bridge answered nothing for the organizer commands, so the panel
   could not be reviewed in a browser; it now serves honest fixtures in
   development only.
+- A rate-limited translation (Google's HTML apology page under HTTP 200) was
+  reported as "response parse failed". It now reports that translation is rate
+  limited, and still returns no text rather than an invented one.
 
 ### Verified in this release
 

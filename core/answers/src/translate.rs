@@ -89,9 +89,11 @@ pub fn translate(text: &str, target_lang: &str) -> Translation {
     let Some(response) = http::get(&url, TIMEOUT_SECS, USER_AGENT, &[ACCEPT_LANGUAGE]) else {
         return Translation::failed(text, TranslateError::RequestFailed);
     };
-    // Google answers a throttled caller with an HTML apology page, which would
-    // otherwise read as an unparseable response from a healthy service.
-    if response.is_rate_limited() {
+    // Google answers a throttled or consent-blocked caller with an HTML apology
+    // page under HTTP 200. The old check only looked at 429, so that page fell
+    // through to the JSON parser and the user was told "parse failed" — the one
+    // diagnosis that sends them looking in the wrong place.
+    if response.is_rate_limited() || looks_like_html(&response.body) {
         return Translation::failed(text, TranslateError::RateLimited);
     }
     if !response.is_success() {
@@ -117,6 +119,12 @@ fn is_valid_lang_code(code: &str) -> bool {
     !code.is_empty()
         && code.len() <= 10
         && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// True when the body is an HTML page rather than the JSON this endpoint
+/// promises — Google's throttling/consent answer.
+fn looks_like_html(body: &str) -> bool {
+    body.trim_start().starts_with('<')
 }
 
 /// Pulls the concatenated translated segments out of the gtx response shape
@@ -145,6 +153,17 @@ fn extract_translation(value: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_html_apology_is_throttling_not_a_parse_failure() {
+        assert!(looks_like_html("<!doctype html><html><head>"));
+        assert!(looks_like_html(
+            "  <html><head><title>Sorry...</title></head></html>"
+        ));
+        assert!(!looks_like_html(
+            r#"[[["مرحبا","hello",null,null,10]],null,"en"]"#
+        ));
+    }
 
     #[test]
     fn rejects_empty_and_bad_lang() {
