@@ -95,6 +95,129 @@ export interface PageResult {
   text: string;
 }
 
+/** A document profile the organizer knows. */
+export type DocumentKind =
+  | "id_card"
+  | "passport"
+  | "invoice"
+  | "receipt"
+  | "bank_statement"
+  | "certificate"
+  | "business_card"
+  | "letter"
+  | "form"
+  | "table"
+  | "unknown";
+
+export type OrganizedBlockKind =
+  | "title"
+  | "heading"
+  | "paragraph"
+  | "list"
+  | "key_value"
+  | "table"
+  | "contact"
+  | "date"
+  | "amount"
+  | "figure"
+  | "equation"
+  | "header"
+  | "footer"
+  | "caption";
+
+export interface OrganizedTable {
+  header: string[];
+  rows: string[][];
+  columns: number;
+  confidence: number;
+  needs_review: boolean;
+}
+
+export interface OrganizedBlock {
+  kind: OrganizedBlockKind;
+  text: string;
+  level?: number | null;
+  items?: string[];
+  key?: string | null;
+  value?: string | null;
+  table?: OrganizedTable | null;
+  confidence: number;
+  source_index: number;
+  page: number;
+}
+
+export type OrganizerLanguage = "arabic" | "english" | "mixed" | "unknown";
+
+export interface OrganizerWarning {
+  code: string;
+  message: string;
+  block?: number | null;
+}
+
+export interface OrganizerStats {
+  characters: number;
+  words: number;
+  arabic_ratio: number;
+  blocks: number;
+  tables: number;
+  needs_review: number;
+}
+
+/** The organized view of the recognized pages. */
+export interface OrganizedDocument {
+  schema: number;
+  pages: number;
+  language: OrganizerLanguage;
+  blocks: OrganizedBlock[];
+  stats: OrganizerStats;
+  warnings: OrganizerWarning[];
+}
+
+export interface ExtractionField {
+  key: string;
+  label: string;
+  label_ar: string;
+  value: string;
+  confidence: number;
+  needs_review: boolean;
+  source_index: number;
+  page: number;
+}
+
+export interface Extraction {
+  schema: number;
+  kind: DocumentKind;
+  confidence: number;
+  language: OrganizerLanguage;
+  fields: ExtractionField[];
+  warnings: OrganizerWarning[];
+}
+
+export interface BatchColumn {
+  key: string;
+  label: string;
+  label_ar: string;
+}
+
+export interface BatchRow {
+  /** Page this row came from. Row order is page order and is never renumbered. */
+  page: number;
+  values: string[];
+  confidence: number;
+  needs_review: boolean;
+}
+
+/** One row per page: a stack of ID cards cannot shift or interleave. */
+export interface BatchExtraction {
+  schema: number;
+  kind: DocumentKind;
+  confidence: number;
+  language: OrganizerLanguage;
+  columns: BatchColumn[];
+  rows: BatchRow[];
+  warnings: OrganizerWarning[];
+}
+
 export interface ModelsStatus {
   dir: string;
   complete: boolean;
@@ -481,6 +604,70 @@ export const api = {
       title,
       filterName,
     }),
+  // The organizer runs in Rust on the pages already in memory. Nothing is
+  // written and nothing leaves the machine.
+  organizePages: (pages: PageResult[]) =>
+    invoke<OrganizedDocument>("organize_pages", { pages }),
+  // `profile` is a manual override; `null` lets the detector decide.
+  extractDocument: (pages: PageResult[], profile: DocumentKind | null = null) =>
+    invoke<Extraction>("extract_document", { pages, profile }),
+  extractDocumentBatch: (pages: PageResult[], profile: DocumentKind | null = null) =>
+    invoke<BatchExtraction>("extract_document_batch", { pages, profile }),
+  // Text formats go through the same Rust-owned save dialog as DOCX/XLSX, so
+  // the page never chooses the path it writes to. `null` = dialog dismissed.
+  exportOrganized: (
+    document: OrganizedDocument,
+    format: "txt" | "csv" | "json" | "md" | "html",
+    defaultName?: string,
+    title?: string,
+    filterName?: string,
+  ) =>
+    invoke<string | null>("export_organized", {
+      document,
+      format,
+      defaultName,
+      title,
+      filterName,
+    }),
+  // The field table is exported from the edited extraction, not re-derived, so
+  // a corrected value is what reaches the file.
+  exportExtraction: (
+    extraction: Extraction,
+    format: "txt" | "csv" | "json" | "md" | "html",
+    defaultName?: string,
+    title?: string,
+    filterName?: string,
+  ) =>
+    invoke<string | null>("export_extraction", {
+      extraction,
+      format,
+      defaultName,
+      title,
+      filterName,
+    }),
+  exportBatch: (
+    batch: BatchExtraction,
+    format: "txt" | "csv" | "json" | "md" | "html",
+    defaultName?: string,
+    title?: string,
+    filterName?: string,
+  ) =>
+    invoke<string | null>("export_batch", {
+      batch,
+      format,
+      defaultName,
+      title,
+      filterName,
+    }),
+  // Rust renders the preview with the same function the exporter uses, so what
+  // the pane shows is exactly what the file will contain.
+  previewExport: (
+    payload:
+      | { kind: "organized"; document: OrganizedDocument }
+      | { kind: "extraction"; extraction: Extraction }
+      | { kind: "batch"; batch: BatchExtraction },
+    format: "txt" | "csv" | "json" | "md" | "html",
+  ) => invoke<string>("preview_export", { payload, format }),
   documentIndexStatus: () => invoke<DocumentIndexStatus>("document_index_status"),
   documentSetIndexing: (enabled: boolean) =>
     invoke<boolean>("document_set_indexing", { enabled }),

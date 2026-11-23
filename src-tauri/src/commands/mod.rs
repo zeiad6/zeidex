@@ -6,6 +6,7 @@ pub mod dialogs;
 pub mod documents;
 pub mod models;
 pub mod ocr;
+pub mod organize;
 pub mod policy;
 pub mod search;
 pub mod settings;

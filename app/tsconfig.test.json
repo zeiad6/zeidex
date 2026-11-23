@@ -35,12 +35,15 @@
     "src/page-range.ts",
     "src/model-format.ts",
     "src/model-format.test.ts",
+    "src/organizer-view.ts",
+    "src/organizer-view.test.ts",
     "src/page-range.test.ts",
     "src/settings-draft.ts",
     "src/settings-draft.test.ts",
     "src/theme.ts",
     "src/theme.test.ts",
     "src/window-size.ts",
-    "src/window-size.test.ts"
+    "src/window-size.test.ts",
+    "src/window-config.test.ts"
   ]
 }

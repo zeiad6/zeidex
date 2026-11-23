@@ -30,6 +30,19 @@ fn dialog_parent(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("main")
 }
 
+/// Puts keyboard focus back on the main window after a native dialog closes.
+///
+/// On Windows the dialog is a separate top-level window owned by the app. When
+/// it closes, the foreground window can stay with the desktop or the previous
+/// application, so the next keystroke goes somewhere else and the launcher
+/// looks frozen. Re-activating the owner is the supported fix; the dialog is
+/// already parented, so this only restores the focus the dialog took.
+fn restore_focus(app: &AppHandle) {
+    if let Some(window) = dialog_parent(app) {
+        let _ = window.set_focus();
+    }
+}
+
 /// Opens a single-file picker and returns the chosen path.
 ///
 /// `title` and `filter_name` are cosmetic and come from the UI so the dialog
@@ -49,10 +62,12 @@ pub fn pick_file(
     extensions: &[&str],
 ) -> Result<Option<PathBuf>, String> {
     let Some(picked) = builder(app, title, filter_name, extensions).blocking_pick_file() else {
+        restore_focus(app);
         return Ok(None);
     };
     let path = picked.into_path().map_err(|err| err.to_string())?;
     policy.mint(&path);
+    restore_focus(app);
     Ok(Some(path))
 }
 
@@ -74,10 +89,12 @@ pub fn pick_folder(
         builder = builder.set_title(title);
     }
     let Some(picked) = builder.blocking_pick_folder() else {
+        restore_focus(app);
         return Ok(None);
     };
     let path = picked.into_path().map_err(|err| err.to_string())?;
     policy.mint(&path);
+    restore_focus(app);
     Ok(Some(path))
 }
 
@@ -98,9 +115,11 @@ pub fn save_file(
         .set_file_name(suggested)
         .blocking_save_file()
     else {
+        restore_focus(app);
         return Ok(None);
     };
     let path = picked.into_path().map_err(|err| err.to_string())?;
+    restore_focus(app);
     Ok(Some(with_extension(path, extension)))
 }
 

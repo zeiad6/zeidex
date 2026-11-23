@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
@@ -22,6 +22,23 @@ import {
 type Mode = "launcher" | "ocr" | "settings" | "batch" | "models";
 
 const DIRECTION_KEY = "zeidex.direction";
+
+/**
+ * The screen's own name, used for the document's single level-one heading.
+ *
+ * Every screen draws its title as styled text, which a screen reader cannot
+ * navigate by; a visually hidden heading gives the document the outline that
+ * landmark and heading navigation expect without changing the design. The
+ * visible titles stay as they are, so the hierarchy a sighted user sees is
+ * unchanged.
+ */
+const SCREEN_TITLE: Record<Mode, { en: string; ar: string }> = {
+  launcher: { en: "Zeidex Search", ar: "Zeidex Search" },
+  ocr: { en: "Document Studio", ar: "استوديو المستندات" },
+  batch: { en: "Batch Search", ar: "البحث الدفعي" },
+  models: { en: "OCR Models", ar: "نماذج OCR" },
+  settings: { en: "Settings", ar: "الإعدادات" },
+};
 
 /**
  * The launcher is a small floating panel; the Studio needs two panes; Settings
@@ -127,10 +144,27 @@ export default function App() {
     };
   }, []);
 
+  // Keyboard focus follows the screen. Clicking "Settings" removes the button
+  // that had focus, so without this the next Tab starts at the top of the
+  // document and a keyboard user has to walk the whole chrome again to reach
+  // the screen they just opened. The launcher is excluded: its query box takes
+  // focus on mount, and taking it back would make the launcher untypeable after
+  // a round trip.
+  const mainRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (mode === "launcher") return;
+    mainRef.current?.focus();
+  }, [mode]);
+
   useEffect(() => {
     void (async () => {
       try {
         const win = getCurrentWindow();
+        // Setting a client size on Windows leaves a maximized window on screen
+        // but clears the maximized state tao tracks, so the caption button
+        // would offer "maximize" on a window the user can no longer restore.
+        // A mode switch has no size to apply while the window is maximized.
+        if (await win.isMaximized()) return;
         // Settings is larger than a 1366x768 laptop can show, so the request is
         // fitted to the monitor before it is applied. The panel scrolls, so a
         // shorter window keeps every control reachable.
@@ -146,34 +180,44 @@ export default function App() {
 
   return (
     <div dir={rtl ? "rtl" : "ltr"} lang={rtl ? "ar" : "en"} className="h-full">
-      <ErrorBoundary scope={mode} rtl={rtl} onReset={() => setMode("launcher")}>
-        {mode === "ocr" ? (
-          <OcrStudio rtl={rtl} onBack={() => setMode("launcher")} />
-        ) : mode === "batch" ? (
-          <BatchSearch rtl={rtl} onBack={() => setMode("launcher")} />
-        ) : mode === "models" ? (
-          <Models rtl={rtl} onBack={() => setMode("launcher")} />
-        ) : mode === "settings" ? (
-          <Settings
-            rtl={rtl}
-            indexStatus={indexStatus}
-            onSetRtl={setDirection}
-            theme={theme}
-            onSetTheme={setThemeChoice}
-            onBack={() => setMode("launcher")}
-          />
-        ) : (
-          <Launcher
-            rtl={rtl}
-            indexStatus={indexStatus}
-            onToggleRtl={() => setDirection(!rtl)}
-            onOpenOcr={() => setMode("ocr")}
-            onOpenBatch={() => setMode("batch")}
-            onOpenModels={() => setMode("models")}
-            onOpenSettings={() => setMode("settings")}
-          />
-        )}
-      </ErrorBoundary>
+      <main
+        ref={mainRef}
+        tabIndex={-1}
+        aria-labelledby="screen-title"
+        className="h-full outline-none"
+      >
+        <h1 id="screen-title" className="sr-only">
+          {rtl ? SCREEN_TITLE[mode].ar : SCREEN_TITLE[mode].en}
+        </h1>
+        <ErrorBoundary scope={mode} rtl={rtl} onReset={() => setMode("launcher")}>
+          {mode === "ocr" ? (
+            <OcrStudio rtl={rtl} onBack={() => setMode("launcher")} />
+          ) : mode === "batch" ? (
+            <BatchSearch rtl={rtl} onBack={() => setMode("launcher")} />
+          ) : mode === "models" ? (
+            <Models rtl={rtl} onBack={() => setMode("launcher")} />
+          ) : mode === "settings" ? (
+            <Settings
+              rtl={rtl}
+              indexStatus={indexStatus}
+              onSetRtl={setDirection}
+              theme={theme}
+              onSetTheme={setThemeChoice}
+              onBack={() => setMode("launcher")}
+            />
+          ) : (
+            <Launcher
+              rtl={rtl}
+              indexStatus={indexStatus}
+              onToggleRtl={() => setDirection(!rtl)}
+              onOpenOcr={() => setMode("ocr")}
+              onOpenBatch={() => setMode("batch")}
+              onOpenModels={() => setMode("models")}
+              onOpenSettings={() => setMode("settings")}
+            />
+          )}
+        </ErrorBoundary>
+      </main>
     </div>
   );
 }

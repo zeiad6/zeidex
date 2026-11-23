@@ -9,6 +9,7 @@ members = [
   "matching",
   "models",
   "ocr_engine",
+  "organizer",
   "ranking",
   "storage",
   "tools",
@@ -22,4 +23,4 @@ rust-version = "1.88"
 edition = "2024"
 license = "GPL-3.0-or-later"
 authors = ["Zeidexsoft"]
-version = "0.3.0"
+version = "0.4.0"

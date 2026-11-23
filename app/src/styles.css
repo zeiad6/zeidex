@@ -88,13 +88,43 @@ body,
 
 body {
   margin: 0;
-  /* The window itself is transparent; the panel paints its own surface. */
+  /* macOS and Linux keep the floating-panel shell: the window itself is
+     transparent and the panel paints its own rounded surface. On Windows the
+     window is opaque (see `tauri.windows.conf.json`) and the shell fills it, so
+     the base colour below is the surface the webview paints before the panel
+     does. A transparent webview over an opaque window is what showed as a
+     white flash during startup. */
   background: transparent;
   color: #e6ebf5;
   font-family: var(--font-sans);
   font-feature-settings: "cv11" 1, "ss01" 1;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* The Windows shell: no floating card, no transparency, no outer shadow. The
+   window is opaque and rectangular, so every pixel is painted by the app and
+   nothing can bleed through during a resize or a DWM recomposition. */
+html[data-os="windows"],
+html[data-os="windows"] body {
+  background: #070910;
+}
+
+html[data-os="windows"] .window-shell {
+  padding: 0;
+}
+
+html[data-os="windows"] .panel {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background:
+    linear-gradient(168deg, #151a26, #070910 58%),
+    #070910;
 }
 
 /* Arabic UI: switch the font stack when the root is RTL. Tailwind's logical
@@ -267,6 +297,29 @@ body {
   box-shadow:
     inset 0 0 0 1px rgb(103 232 249 / 0.25),
     0 1px 8px -2px rgb(34 211 238 / 0.35);
+}
+
+/* Narrow windows (the minimum is 520 px): the launcher header carries the
+   wordmark, four filter tabs and the caption buttons on one row, and together
+   they need about 710 px. Below that the tabs move to a second row instead of
+   pushing the caption buttons off the window, which would leave no way to
+   minimize or close it. The row order is explicit because the tabs sit between
+   the wordmark and the actions in the markup. */
+@media (max-width: 720px) {
+  .launcher-header {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  .launcher-header nav {
+    order: 3;
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+
+  .launcher-actions {
+    order: 2;
+  }
 }
 
 /* Caption buttons for the frameless window. Sized to the Windows caption

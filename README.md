@@ -254,6 +254,45 @@ Why the details matter:
   expect.
 - **PDFs are rasterized locally** with pdfium — no ghostscript, no cloud converter.
 
+### Data Intelligence
+
+The Studio's last button opens **Data intelligence**: the recognized pages, read as a
+document rather than a wall of text. It detects the document type (ID card, passport,
+invoice, receipt, bank statement, certificate, business card, letter, form, table),
+pulls the labeled fields into a table, and gives every page its own row when you scan a
+stack. The detector is deterministic and rule-based — it never rewrites a value, never
+calculates a missing total, and flags anything it is not sure about instead of guessing.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/data-intelligence-fields.png" alt="Data intelligence: invoice fields with confidence per field and one flagged for review" /></td>
+    <td width="50%"><img src="assets/screenshots/data-intelligence-batch.png" alt="Data intelligence: one row per page with the page column kept in order" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Fields with their confidence; the low-confidence total is flagged, not hidden.</sub></td>
+    <td align="center"><sub>Batch: one row per page, in page order. A blank page keeps its row.</sub></td>
+  </tr>
+</table>
+
+What it guarantees:
+
+- **One page, one row.** A stack of ID cards keeps its order. A page that produced no
+  fields keeps an empty row instead of letting the next card move up, and a repeated
+  national number is reported with both page numbers rather than dropped.
+- **The profile is yours to correct.** Picking a document type re-runs the extraction
+  with that profile — for the single document *and* the batch table, so the two cannot
+  disagree.
+- **Corrections are what get exported.** Edit a cell, and the exported CSV/JSON/Markdown
+  carries the edited value; the OCR confidence stays as the record of what was read.
+- **No invention.** No total is calculated, no field is filled from a guess, and an
+  empty profile says so.
+
+The panel shows the recognized source next to the organized result, and previews the
+exact bytes of JSON, CSV and Markdown through the same Rust renderer that writes the
+file. Exports: TXT, CSV, JSON, Markdown and HTML, through the Rust-owned save dialog.
+PDF export is not offered: there is no Arabic-shaping PDF writer in the build, and a
+PDF that breaks Arabic is worse than no button.
+
 ### Batch Search
 
 The launcher answers one query at a time. Batch Search takes a **list** — a

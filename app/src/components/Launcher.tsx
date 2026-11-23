@@ -378,10 +378,10 @@ export default function Launcher({
   const busy = indexing || (indexStatus?.indexing ?? false);
 
   return (
-    <div className="flex h-full items-start justify-center bg-transparent px-4 pt-[10vh]">
-      <div className="panel w-[min(780px,94vw)]">
+    <div className="window-shell flex h-full items-start justify-center bg-transparent px-4 pt-[10vh]">
+      <div className="panel flex w-[min(780px,94vw)] flex-col">
         <header
-          className="relative flex items-center gap-4 px-5 pb-3 pt-4"
+          className="launcher-header relative flex items-center gap-4 px-5 pb-3 pt-4"
           data-tauri-drag-region
         >
           <span className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-accent-400/40 to-transparent" />
@@ -400,22 +400,24 @@ export default function Launcher({
             ))}
           </nav>
 
-          <div className="ms-auto flex items-center gap-1.5">
+          <div className="launcher-actions ms-auto flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               onClick={onOpenOcr}
-              className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-accent-400/30 hover:bg-accent-400/10 hover:text-accent-200"
+              aria-label={rtl ? "استوديو OCR" : "OCR Studio"}
+              title={rtl ? "استوديو OCR" : "OCR Studio"}
+              className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-zinc-400 transition hover:border-accent-400/30 hover:bg-accent-400/10 hover:text-accent-200"
             >
-              <Icon name="scan" size={13} />
-              {rtl ? "استوديو OCR" : "OCR Studio"}
+              <Icon name="scan" size={14} />
             </button>
             <button
               type="button"
               onClick={onOpenBatch}
-              className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-iris-400/30 hover:bg-iris-400/10 hover:text-iris-400"
+              aria-label={rtl ? "البحث الدفعي" : "Batch Search"}
+              title={rtl ? "البحث الدفعي" : "Batch Search"}
+              className="grid h-8 w-8 place-items-center rounded-full border border-white/10 text-zinc-400 transition hover:border-iris-400/30 hover:bg-iris-400/10 hover:text-iris-400"
             >
-              <Icon name="table" size={13} />
-              {rtl ? "البحث الدفعي" : "Batch Search"}
+              <Icon name="table" size={14} />
             </button>
             <button
               type="button"
@@ -507,7 +509,9 @@ export default function Launcher({
           </div>
         )}
 
-        <div className="min-h-[9rem]">
+        {/* The window can be as short as 360 px. Without its own scroll the
+            idle cards ran under the footer, which reads as clipped content. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {translateText !== null ? (
             <TranslationPanel text={translateText} rtl={rtl} />
           ) : tab === "clipboard" ? (
@@ -550,6 +554,44 @@ export default function Launcher({
                   </span>
                 </div>
               ))}
+              {/* The Studio and Batch Search used to be labelled buttons in the
+                  header. At the launcher's 760 px they wrapped onto two lines
+                  and pushed the caption buttons off the row, so they are icon
+                  buttons there and get a real entry point here instead. */}
+              <button
+                type="button"
+                onClick={onOpenOcr}
+                className="group col-span-1 flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-start transition hover:border-accent-400/30 hover:bg-accent-400/[0.06] sm:col-span-2"
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-400/10 text-accent-300">
+                  <Icon name="scan" size={15} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[0.72rem] font-semibold text-zinc-200">
+                    {rtl ? "استوديو OCR" : "OCR Studio"}
+                  </span>
+                  <span className="block truncate text-[0.66rem] text-zinc-500">
+                    {rtl ? "اقرأ صورة أو PDF إلى Word وExcel" : "Read a scan or PDF into Word and Excel"}
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={onOpenBatch}
+                className="group flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-start transition hover:border-iris-400/30 hover:bg-iris-400/[0.06]"
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-iris-500/10 text-iris-400">
+                  <Icon name="table" size={15} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[0.72rem] font-semibold text-zinc-200">
+                    {rtl ? "البحث الدفعي" : "Batch Search"}
+                  </span>
+                  <span className="block truncate text-[0.66rem] text-zinc-500">
+                    {rtl ? "تحقّق من قائمة أسماء" : "Check a pasted list of names"}
+                  </span>
+                </span>
+              </button>
             </div>
           ) : calc && visible.length === 0 ? (
             // The calculator row above is already the answer; an empty-state

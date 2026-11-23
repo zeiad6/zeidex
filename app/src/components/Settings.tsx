@@ -1277,7 +1277,7 @@ export default function Settings({
   const hasErrors = Object.keys(change.errors).length > 0;
 
   return (
-    <div className="flex h-full items-center justify-center px-3 py-3">
+    <div className="window-shell flex h-full items-center justify-center px-3 py-3">
       <div className="panel flex h-[94vh] w-[min(1120px,97vw)] flex-col">
         <header className="relative flex items-center gap-3 px-5 pb-3 pt-4" data-tauri-drag-region>
           <span className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-accent-400/40 to-transparent" />
@@ -1298,10 +1298,15 @@ export default function Settings({
               Zeidex Search
             </span>
           </div>
-          <span className="ms-auto rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono text-[0.66rem] text-zinc-400" dir="ltr">
-            v{settings?.version ?? "—"}
-          <WindowControls rtl={rtl} />
-          </span>
+          <div className="ms-auto flex items-center gap-2">
+            <span
+              className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 font-mono text-[0.66rem] text-zinc-400"
+              dir="ltr"
+            >
+              v{settings?.version ?? "—"}
+            </span>
+            <WindowControls rtl={rtl} />
+          </div>
         </header>
 
         {notice && (

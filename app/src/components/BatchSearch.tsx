@@ -278,7 +278,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
   const progress = summary && summary.total > 0 ? summary.success_percent : 0;
 
   return (
-    <div className="flex h-full items-center justify-center px-3 py-3">
+    <div className="window-shell flex h-full items-center justify-center px-3 py-3">
       <div className="panel flex h-[94vh] w-[min(1460px,97vw)] flex-col">
         <header className="relative flex items-center gap-3 px-5 pb-3 pt-4" data-tauri-drag-region>
           <span className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-accent-400/40 to-transparent" />

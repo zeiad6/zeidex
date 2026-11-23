@@ -58,6 +58,14 @@ pub fn report_startup_failure(message: &str) {
 
 pub fn run() -> anyhow::Result<()> {
     let app = tauri::Builder::default()
+        // Registered first so a second launch exits before any other plugin
+        // starts. The running instance raises its window instead: the common
+        // case is a user clicking the Start Menu entry while Zeidex sits in the
+        // tray, where a second process would add a second tray icon, a second
+        // clipboard monitor and a second index watcher over the same database.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_main(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
@@ -238,6 +246,13 @@ pub fn run() -> anyhow::Result<()> {
             commands::ocr::ocr_cancel,
             commands::ocr::export_docx_pages,
             commands::ocr::export_xlsx_pages,
+            commands::organize::organize_pages,
+            commands::organize::extract_document,
+            commands::organize::extract_document_batch,
+            commands::organize::preview_export,
+            commands::organize::export_extraction,
+            commands::organize::export_organized,
+            commands::organize::export_batch,
             commands::system::open_target,
             commands::system::reveal_target,
             commands::system::open_url,
@@ -356,6 +371,19 @@ fn build_tray(handle: &AppHandle) -> anyhow::Result<()> {
         .icon(icon)
         .tooltip("Zeidex Search")
         .menu(&menu)
+        // Windows users left-click a tray icon to open its application; the
+        // menu is the right-click convention. Without this the only way in from
+        // the tray is to discover the menu, which reads as a dead icon.
+        .on_tray_icon_event(|tray, event| {
+            if let tauri::tray::TrayIconEvent::Click {
+                button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
+                ..
+            } = event
+            {
+                toggle_window(tray.app_handle());
+            }
+        })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => toggle_window(app),
             "ocr" => {

@@ -1,6 +1,6 @@
 [package]
 name = "zeidex"
-version = "0.3.0"
+version = "0.4.0"
 description = "Zeidex Search — offline file search, OCR and document AI"
 edition = "2024"
 rust-version = "1.88"
@@ -27,6 +27,10 @@ directml = ["zeidex-ocr/directml"]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
+# One process per user session: a second launch from the Start Menu hands its
+# arguments to the running instance and exits, instead of adding a tray icon and
+# a clipboard monitor beside it.
+tauri-plugin-single-instance = "2"
 
 # `translate` is the `tr"` mode: the launcher's only network feature, off in
 # the core by default so the OCR/document pipeline stays offline-only.
@@ -37,6 +41,7 @@ zeidex-engine = { path = "../core/engine" }
 zeidex-indexing = { path = "../core/indexing" }
 zeidex-models = { path = "../core/models" }
 zeidex-ocr = { path = "../core/ocr_engine" }
+zeidex-organizer = { path = "../core/organizer" }
 zeidex-exporter = { path = "../core/exporter" }
 zeidex-storage = { path = "../core/storage" }
 

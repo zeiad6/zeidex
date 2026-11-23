@@ -15,6 +15,7 @@ import { Icon } from "./Icons";
 import WindowControls from "./WindowControls";
 import PagePreviewPane from "./ocr/PagePreview";
 import RegionEditor from "./ocr/RegionEditor";
+import DataIntelligence from "./ocr/DataIntelligence";
 import {
   flattenTextRegions,
   replacePage,
@@ -71,6 +72,10 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
   // message (an unsupported drop, a preview failure) must not make the run look
   // finished: the controls stay locked until the command actually returns.
   const [running, setRunning] = useState(false);
+  // A frozen snapshot of the pages the drawer opened on: the panel covers the
+  // studio, so nothing can edit them underneath it, and the analysis runs once.
+  const [intelligencePages, setIntelligencePages] = useState<PageResult[] | null>(null);
+  const intelligenceToggle = useRef<HTMLButtonElement | null>(null);
   const unlistenRef = useRef<(() => void) | undefined>(undefined);
   const previewCache = useRef(new Map<string, PagePreview>());
   const runningRef = useRef(false);
@@ -427,6 +432,17 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
     }
   };
 
+  // Opening the drawer finalizes a pending text edit first, so the organizer
+  // reads exactly what the editor shows.
+  const openIntelligence = () => {
+    setIntelligencePages(commitDraft());
+  };
+
+  const closeIntelligence = () => {
+    setIntelligencePages(null);
+    intelligenceToggle.current?.focus();
+  };
+
   const missing = models && !models.complete ? models.missing : [];
   const modelsReady = models?.complete === true;
 
@@ -446,7 +462,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
 
 
   return (
-    <div className="flex h-full items-center justify-center px-3 py-3">
+    <div className="window-shell flex h-full items-center justify-center px-3 py-3">
       <div className="panel relative flex h-[94vh] w-[min(1460px,97vw)] flex-col">
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-[inherit] bg-ink-950/75 backdrop-blur-sm">
@@ -493,7 +509,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                 : "Models missing"}
           </span>
 
-          <span className="ms-auto flex items-center gap-1.5">
+          <div className="ms-auto flex items-center gap-1.5">
             {isPdf && (
               <span
                 className="flex items-center gap-1 text-[0.62rem] text-zinc-500"
@@ -574,8 +590,8 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                       : "Run OCR"}
               </button>
             )}
-          <WindowControls rtl={rtl} />
-          </span>
+            <WindowControls rtl={rtl} />
+          </div>
         </header>
 
         {missing.length > 0 && (
@@ -824,6 +840,17 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             <FileGlyph path="export.xlsx" size={15} />
             Excel
           </button>
+          <button
+            type="button"
+            ref={intelligenceToggle}
+            onClick={openIntelligence}
+            disabled={pages.length === 0}
+            aria-haspopup="dialog"
+            className="flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-zinc-300 transition hover:border-iris-400/30 hover:bg-iris-400/10 hover:text-iris-400 disabled:opacity-40"
+          >
+            <Icon name="sparkle" size={12} />
+            {rtl ? "ذكاء البيانات" : "Data intelligence"}
+          </button>
           {pages.length > 0 && (
             <span className="text-zinc-600">
               {countLabel("pages", pages.length, rtl)}
@@ -833,6 +860,14 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             {models?.dir ?? "PP-OCRv4 · SLANet"}
           </span>
         </footer>
+
+        {intelligencePages && (
+          <DataIntelligence
+            pages={intelligencePages}
+            rtl={rtl}
+            onClose={closeIntelligence}
+          />
+        )}
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import {
   SAMPLE_PREVIEW,
   TRANSLATIONS,
 } from "./fixtures";
+import { DEMO_ORGANIZED, demoBatch, demoExtraction } from "./organizer";
 
 type Args = Record<string, unknown>;
 
@@ -35,7 +36,7 @@ export function installMock() {
   let demoPacks = MODEL_PACKS.map((pack) => ({ ...pack, files: pack.files.map((file) => ({ ...file })) }));
   let demoActive = "ppocrv4-mobile";
   let demoSettings = {
-    version: "0.3.0",
+    version: "0.4.0",
     platform: "windows",
     configPath: "C:\\Users\\you\\AppData\\Roaming\\zeidex\\config.json",
     dbPath: "C:\\Users\\you\\AppData\\Roaming\\zeidex\\zeidex.db",
@@ -350,6 +351,16 @@ export function installMock() {
         pdfRun.cancelled = true;
         return true;
       }
+      // The organizer runs in Rust; the demo answers with the fixture that
+      // describes the same demo pages, so the panel can be reviewed in a
+      // browser. Exports and previews are not faked: the real bodies come from
+      // `core/organizer/src/render.rs` and only exist when Rust is present.
+      case "organize_pages":
+        return DEMO_ORGANIZED;
+      case "extract_document":
+        return demoExtraction(args.profile);
+      case "extract_document_batch":
+        return demoBatch(args.profile);
       case "translate_text": {
         const lang = String(args.targetLang ?? "en");
         return {

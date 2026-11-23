@@ -11,6 +11,18 @@ import { applyTheme, resolveTheme, storedTheme, systemPrefersLight } from "./the
  * dropped from production builds.
  */
 /**
+ * Windows renders the window opaque: the shell fills it edge to edge instead
+ * of floating a rounded panel over a transparent surface. WebView2 composites
+ * a transparent window through the DWM blur-behind path, which is what produced
+ * ghosting, see-through panels and repaint artifacts on resize. The platform is
+ * recorded on the root element before the first React render so the CSS can
+ * switch the shell without a frame of the wrong layout.
+ */
+if (typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent)) {
+  document.documentElement.dataset.os = "windows";
+}
+
+/**
  * Paint the saved theme before the first frame. Doing it in React would show
  * one dark frame on a light desktop, and a launcher that flashes is worse than
  * one that starts a millisecond later.
