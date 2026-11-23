@@ -112,3 +112,9 @@ updates:
       - dependency-name: "typescript"
         versions:
           - ">=6.0.0"
+      # The project builds and tests on Node 22 (CI and Tauri's tooling).
+      # Types for a newer Node major describe APIs the runtime does not have;
+      # bump this entry together with the Node version, not before.
+      - dependency-name: "@types/node"
+        versions:
+          - ">=23.0.0"
