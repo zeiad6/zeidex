@@ -38,10 +38,7 @@ pub fn discover_local_files_and_folders(
     tx: mpsc::SyncSender<Candidate>,
     control: Option<&IndexControl>,
 ) {
-    let mut roots = config.file_scan_roots.clone();
-    roots.extend(config.file_scan_extra_roots.iter().cloned());
-    roots.sort();
-    roots.dedup();
+    let roots = config.file_scan_root_list();
 
     // Compile the ignore matchers once, not once per root.
     let ignored_file_matchers = build_ignored_matchers(&config.ignored_file_patterns);
@@ -433,6 +430,45 @@ mod tests {
             "C:/Users/demo/Downloads/cache/a.txt",
             &excludes
         ));
+    }
+
+    #[test]
+    fn a_folder_added_in_settings_is_walked_before_the_limit_is_spent() {
+        // `file_scan_limit` is one budget shared by the whole walk, so the root
+        // walked first spends it. The walk used to sort the roots, which put a
+        // standard folder (`a-standard`) ahead of the folder the user had just
+        // added (`z-added`) for no reason but its name, so the added folder was
+        // never reached and its files never appeared in search.
+        let standard = temp_path("a-standard");
+        let added = temp_path("z-added");
+        std::fs::create_dir_all(&standard).expect("create standard root");
+        std::fs::create_dir_all(&added).expect("create added root");
+        for index in 0..5 {
+            std::fs::write(standard.join(format!("file-{index}.txt")), "x")
+                .expect("write standard file");
+        }
+        std::fs::write(added.join("wanted.txt"), "x").expect("write added file");
+
+        let config = RuntimeConfig {
+            file_scan_roots: vec![standard.to_string_lossy().into_owned()],
+            file_scan_extra_roots: vec![added.to_string_lossy().into_owned()],
+            file_scan_depth: 4,
+            file_scan_limit: 5,
+            ..Default::default()
+        };
+        let (tx, rx) = mpsc::sync_channel(64);
+        discover_local_files_and_folders(&config, tx, None);
+        let walked = rx
+            .try_iter()
+            .map(|candidate| candidate.path)
+            .collect::<Vec<_>>();
+        assert!(
+            walked.iter().any(|path| path.ends_with("wanted.txt")),
+            "the folder the user added must be indexed, not starved by the limit: {walked:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&standard);
+        let _ = std::fs::remove_dir_all(&added);
     }
 
     #[test]

@@ -112,7 +112,8 @@ jobs:
           cargo test --manifest-path core/Cargo.toml -p zeidex-ocr --lib
           cargo test --manifest-path core/Cargo.toml -p zeidex-ocr \
             --test ocr_smoke --test layout_smoke --test table_smoke --test ocr_accuracy \
-            --test arabic_smoke --test pdf_smoke
+            --test arabic_smoke --test arabic_cer --test pdf_smoke \
+            --test pdf_native_text --test pdf_lifecycle
           cargo test --manifest-path core/Cargo.toml -p zeidex-exporter \
             --test export ocr_output_exports_to_word_and_excel
 

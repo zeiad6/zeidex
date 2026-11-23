@@ -215,9 +215,7 @@ impl OcrEngine {
                         .to_string(),
                 )
             })?;
-            let document = pdfium
-                .load_pdf_from_file(path, None)
-                .map_err(|err| OcrError::Pdf(err.to_string()))?;
+            let document = pdf::load_document(pdfium, path)?;
             pdf::render_document_page(&document, page as i32, self.dpi)?
         } else {
             // Same loader as `process_image`: a preview drawn from the raw
@@ -307,9 +305,7 @@ impl OcrEngine {
                     .to_string(),
             )
         })?;
-        let document = pdfium
-            .load_pdf_from_file(path, None)
-            .map_err(|err| OcrError::Pdf(err.to_string()))?;
+        let document = pdf::load_document(pdfium, path)?;
         let total = pdf::page_count(&document).max(0) as usize;
         let window = pdf_page_window(total, range)?;
         let selected = window.len();

@@ -461,3 +461,222 @@ the demo answers the same Tauri commands the shell does, including the new
     with its own test run, not a version bump, so the three PRs were closed and
     the incompatible ranges are ignored in `.github/dependabot.yml` until the
     migration is done. Patch releases inside the verified lines still arrive.
+
+---
+
+## L. Post-0.3.0 hardening (unreleased)
+
+The changes below are in the working tree after the 0.3.0 report was written.
+They are recorded separately so the released 0.3.0 evidence above stays accurate.
+
+### L1. The Windows window is opaque
+
+**Cause.** The base config opened an undecorated window with
+`transparent: true` and `shadow: true`. tao implements Windows transparency by
+calling `DwmEnableBlurBehindWindow` with an empty region, so the window is
+composited by DWM instead of painted opaquely. The panel surface itself is a
+`rgba()` gradient at 0.96/0.97 alpha, so what showed through was the desktop or
+the previous frame: the ghost window. The panel also relied on a transparent
+margin around it to look like a floating card, which cannot be produced by an
+opaque window.
+
+**Change.**
+
+- `src-tauri/tauri.windows.conf.json` overrides the `main` window for Windows:
+  `transparent: false`, `shadow: false`, `backgroundColor: "#070910"`, same
+  geometry, `decorations: false`, `visible: false`. The platform file repeats
+  every base field because Tauri merges window arrays by replacement.
+- `app/src/main.tsx` records the platform on `<html data-os="windows">` before
+  the first React render.
+- `app/src/styles.css` makes `.window-shell` padding-free and `.panel`
+  full-bleed, square-cornered and fully opaque on that attribute.
+- macOS and Linux keep the translucent floating panel unchanged.
+- The tray icon now toggles the window on left click, matching Windows
+  convention; the menu stays on right click.
+- `setSize`/`center` are skipped while the window is maximized: tao clears the
+  maximized flag when a client size is set on Windows, which desynchronised the
+  caption button from the real window state.
+
+**Guard.** `app/src/window-config.test.ts` (5 tests) fails if Windows regains
+transparency or a shadow, if the platform file drops a base window field, if the
+base config loses transparency for macOS/Linux, if the NSIS bitmaps are not
+150×57 / 164×314 24-bit BMP, or if the licence, icons or installer icon are
+missing. It runs under `npm test`.
+
+### L2. PDFium is bound once and every FFI call is serialised
+
+**Cause.** `pdfium-render` keeps its library bindings in a process-global
+`OnceCell`; `Pdfium::bind_to_library` succeeds once and every later call returns
+`PdfiumLibraryBindingsAlreadyInitialized`. `OcrEngine::new` bound the library per
+engine, so activating a model pack, benchmarking, or resetting the engine after
+a failed run failed with that error and took image OCR down with it. Binding
+once is necessary but not sufficient: pdfium keeps process-wide state that is
+not thread-safe, and a preview could render while an OCR run paged through the
+same document.
+
+**Change.** `core/ocr_engine/src/pdf.rs` owns a process-wide `SHARED_PDFIUM`
+(`Mutex<Option<Arc<Pdfium>>>`), a `PDFIUM_FFI` mutex held for one FFI call, and a
+`SharedDocument` wrapper whose `Drop` closes the document under the same lock.
+`pipeline.rs` opens documents through `pdf::load_document`. The lock is never
+held for a recognition pass, so rayon workers still run in parallel.
+
+**Tests.** `pdf_lifecycle` (two tests, 180.8 s with the real library) covers
+"a second engine reuses the bound pdfium" and "concurrent previews and OCR share
+pdfium safely" (4 threads × 3 iterations). `pdf_native_text` covers the
+born-digital fast path. Both pass.
+
+### L3. Smaller defects fixed in the same pass
+
+- **Second launches started a second application.** Nothing stopped a second
+  process, so clicking the Start Menu entry while Zeidex sat in the tray added a
+  second tray icon, a second clipboard monitor and a second index watcher over
+  the same SQLite database. `tauri-plugin-single-instance` is now registered
+  first in the builder: the second process hands its arguments to the running
+  instance, which raises its window, and exits. On Windows the plugin also calls
+  `AllowSetForegroundWindow`, so the running instance is allowed to take the
+  foreground, which a background process normally cannot do. On Linux it uses a
+  D-Bus name and degrades to "launch normally" when no session bus exists
+  instead of failing to start. Verified with `cargo check`, `cargo clippy` and
+  `cargo test --lib` (69 passed); the two-process behaviour itself needs a
+  desktop session to exercise.
+- **Dead configuration keys.** `ui_*` and `query_retention_seconds` were written
+  by the config generator but never parsed. They are gone from
+  `core/engine/src/config.rs`, and `every_generated_config_key_is_parsed` fails
+  if a future key is added without a reader.
+- **Dialog focus.** `dialogs.rs` re-activates the main window after every native
+  dialog closes, success or cancel, so the next keystroke does not go to the
+  desktop.
+- **Capabilities.** `src-tauri/capabilities/default.json` now grants only the
+  window calls the page actually makes (hide, drag, size, centre, monitor,
+  minimise, toggle-maximise, is-maximised, close). Tray and shortcut permissions
+  are gone because both run in Rust.
+- **Broken header markup.** `OcrStudio` and `Settings` nested `WindowControls`
+  inside a `<span>`, which broke the flex layout of the caption buttons. Both
+  are `<div>` wrappers now; screenshots confirm the buttons sit at the trailing
+  edge.
+- **The embedded frontend was not a build input.** `generate_context!` bakes
+  `app/dist` into the shell binary, but `tauri-build`'s `rerun-if-changed` list
+  names only `tauri.conf.json`, `capabilities/` and the bundled resources (read
+  from `target/release/build/zeidex-*/output`). A frontend-only change followed
+  by `cargo build` could therefore reuse the previous shell crate and ship the
+  old UI - invisible until someone opens the app. `src-tauri/build.rs` now adds
+  `cargo:rerun-if-changed=../app/dist`, so the shell crate rebuilds whenever the
+  page it embeds changes.
+- **Installer identity.** The NSIS block now carries a branded header and
+  sidebar generated from `assets/brand/zeidex-mark.svg` by
+  `src-tauri/installer/generate.py`, the GPL text as `licenseFile`, English and
+  Arabic with a language selector, `currentUser` install, a Start Menu folder
+  and an uninstaller icon.
+- **`AGENTS.md`.** The repository had no project instructions; the new file
+  records the architecture, commands, Windows/PDFium/Arabic contracts and the
+  verification standard.
+
+### L4. A folder added in Settings could never be indexed
+
+**Cause.** `file_scan_limit` is one budget shared by the whole walk, and
+`discover_local_files_and_folders` sorted the roots before walking them. Sorting
+is alphabetical, not intentional: `/root/Downloads` (or `C:\Users\me\Downloads`)
+sorts ahead of most names a user picks, and a large Downloads folder could spend
+the entire 8,000-entry budget before the folder the user had just added was
+reached. The folder then existed in the config, was accepted by Settings, and
+never appeared in search - a silent failure with no error anywhere.
+
+**Change.** `RuntimeConfig::file_scan_root_list()` is now the single place that
+orders the roots: folders the user added (`file_scan_extra_roots`, written by
+Settings) first, then `file_scan_roots` in the order the config lists them, with
+order-preserving de-duplication. The walk (`index/files.rs`) and the watcher
+(`lib.rs`) both call it, so they cannot drift apart; the previous "same roots,
+same order" comment was a promise between two copies of the sort.
+
+**Test.** `a_folder_added_in_settings_is_walked_before_the_limit_is_spent`
+builds a standard root that sorts first with five files and an added root that
+sorts later with one, sets `file_scan_limit = 5`, and asserts the added file is
+indexed. Reverting the fix makes it fail with exactly the reported symptom
+(only the five standard files are walked), so the test guards the behaviour
+rather than describing it.
+
+### L5. Every screen now has a document outline
+
+An axe-core 4.10.2 run against the real React tree (headless Chrome, the demo
+bridge, 1280×880) reported the same three failures on all five screens:
+`landmark-one-main` (no `<main>`), `page-has-heading-one` (no `<h1>`) and
+`region` (content outside any landmark). A screen reader could not jump to the
+screen or list its headings; every visible title was a styled `<span>`.
+
+`app/src/App.tsx` now wraps the active screen in `<main>`, carries one
+visually hidden `<h1>` named after the screen (English and Arabic), and moves
+focus to that main element when the user opens a sub-screen. The launcher is
+excluded from the focus move because its query box takes focus on mount, and
+stealing it back would leave the launcher untypeable after a round trip.
+
+Re-run of the same audit: **0 violations on launcher, Document Studio, Batch
+Search, OCR Models and Settings** (1 "needs review" item per screen, the
+gradient-background contrast check that axe cannot decide automatically).
+
+### L6. What was verified on this host
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Core tests | `cargo test --workspace --manifest-path core/Cargo.toml --offline` | 590 passed, 0 failed, 2 ignored (scale checks) |
+| Core clippy | `cargo clippy --workspace --lib … -- -D clippy::unwrap_used -D clippy::expect_used` | pass |
+| Shell tests | `cargo test --lib --manifest-path src-tauri/Cargo.toml --offline` | 69 passed |
+| Shell clippy | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --offline -- -D warnings …` | pass |
+| Formatting | `cargo fmt --check`, both manifests | pass |
+| Frontend | `cd app && npm test && npm run build` | 86/86, build 408.10 kB JS / 73.44 kB CSS |
+| Arabic OCR | `--test arabic_cer` with the real models | CER 0.60 %, WER 3.45 % |
+| PDF lifecycle | `--test pdf_lifecycle --test pdf_native_text` | 3 passed |
+| Search latency | `-p zeidex-engine --release --test match_latency -- --ignored` | 50k candidates: prefix 24.1 ms p50, suffix 45.8 ms, approximate 26.4 ms |
+| UI | headless Chrome against the demo bridge at 760×520, 1280×880, 1140×820, 520×360, LTR/RTL, dark/light | reviewed |
+| Accessibility | axe-core 4.10.2 against the real React tree, five screens | 0 violations per screen |
+
+#### The real binary, under Xvfb
+
+`target/release/zeidex` was launched on a virtual X server (`:99`,
+1600×1000×24) with an isolated config, database and model root. What the run
+established:
+
+- The process starts, creates its window at **760×520** and maps it, with no
+  panic and no error in the log beyond the expected
+  `libayatana-appindicator is deprecated` warning from the tray backend.
+- The database is created with the full schema: `settings`, `candidates`,
+  `usage_events`, `index_state`, `clipboard_entries`, `document_text`,
+  `document_token`, `url_history`.
+- The index worker walks the configured roots and stores **243 applications,
+  500 files and 191 folders**.
+- The added root `/root/zeidex-fixture` produced all six expected candidates -
+  the folder `Projects`, `Zeidex Notes.txt`, `budget-forecast.xlsx`,
+  `invoice-2026-01234.pdf`, `تقرير المبيعات.docx` and `مشروع النور.xlsx` -
+  including Arabic titles stored intact. On the same setup **before** the
+  root-ordering fix the count was zero: `/root/Downloads` sorted ahead of
+  `/root/zeidex-fixture` and spent the whole 500-entry budget. The fix is
+  therefore proven end to end through the real binary, not only by the unit
+  test.
+
+**What this environment cannot show.** WebKitGTK 2.52.6 never paints inside
+this Xvfb/PRoot server: the window is mapped and the correct size, but a
+window-targeted capture is uniform black in all three paint modes tried
+(default, `WEBKIT_DISABLE_COMPOSITING_MODE=1`,
+`WEBKIT_DISABLE_DMABUF_RENDERER=1`). No compositor (picom/openbox/mutter) is
+installed and the GPU is software-only. Pixel appearance is therefore verified
+in headless Chrome against the same built assets, not in the GTK webview; that
+distinction is carried into L7 rather than glossed over.
+
+### L7. What remains unavailable for verification
+
+- **Windows runtime.** No Windows machine, no WebView2 and no display server
+  here. Transparency, ghosting, flicker, resize, DPI, multi-monitor, tray click,
+  caption buttons, dialog z-order, console absence and the installer's
+  install/upgrade/uninstall cycle are compiled, unit-tested and config-tested
+  but not exercised on Windows. Every field of `tauri.windows.conf.json` and the
+  NSIS block was checked against the Tauri config schema; the artwork is checked
+  at the pixel level.
+- **Installer execution.** NSIS and MSI cannot be built on this host (no Windows
+  target, no WiX). The bundle is built by the release workflow on
+  `windows-latest`; that run is the first real build, and install, upgrade and
+  uninstall are still untested.
+- **GPU paths.** CUDA and DirectML features compile only with their toolchains;
+  the advisor reports them only when the build and a device both exist.
+- **Linux webview rendering.** On this host WebKitGTK maps the window but paints
+  nothing under Xvfb (uniform black in every compositing mode), so the GTK
+  webview's pixels were not inspected. The same built assets were inspected in
+  headless Chrome instead. A Linux desktop with a real compositor is untested.

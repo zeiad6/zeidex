@@ -108,3 +108,47 @@ fn a_second_engine_reuses_the_bound_pdfium() -> zeidex_ocr::OcrResult<()> {
 
     Ok(())
 }
+
+/// Preview and OCR the same PDF from several threads at once.
+///
+/// The Studio does exactly this when the user flips through pages while a run
+/// is in flight. pdfium keeps process-wide state that is not thread-safe, so
+/// without the FFI lock the calls interleave inside the C library; the failure
+/// is a crash or corrupted page, not an `Err`, which is why it has to be run
+/// rather than reasoned about.
+#[test]
+fn concurrent_previews_and_ocr_share_pdfium_safely() -> zeidex_ocr::OcrResult<()> {
+    let Some(fixtures) = fixtures() else {
+        eprintln!(
+            "skipping: set ZEIDEX_TEST_MODELS_DIR, ZEIDEX_TEST_PDF and ZEIDEX_TEST_PDFIUM_LIB"
+        );
+        return Ok(());
+    };
+    let engine = Arc::new(engine(&fixtures)?);
+    let pdf = Arc::new(Path::new(&fixtures.pdf).to_path_buf());
+
+    let mut handles = Vec::new();
+    for worker in 0..4 {
+        let engine = Arc::clone(&engine);
+        let pdf = Arc::clone(&pdf);
+        handles.push(std::thread::spawn(move || {
+            let no_progress = |_event: zeidex_ocr::PipelineProgress| {};
+            for _ in 0..3 {
+                if worker % 2 == 0 {
+                    let preview = engine.page_preview(&pdf, 0, 640)?;
+                    assert!(!preview.png.is_empty());
+                } else {
+                    let pages = engine.process_pdf(&pdf, &no_progress)?;
+                    assert_eq!(pages.len(), 1);
+                }
+            }
+            Ok::<(), zeidex_ocr::OcrError>(())
+        }));
+    }
+    for handle in handles {
+        handle
+            .join()
+            .map_err(|_| zeidex_ocr::OcrError::Pdf("a worker panicked".to_string()))??;
+    }
+    Ok(())
+}

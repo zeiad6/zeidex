@@ -422,10 +422,7 @@ impl QueryEngine {
 
         // Same roots, same order as `discover_local_files_and_folders`, so an
         // overlapping root cannot make the watcher index a path the walk drops.
-        let mut roots = config.file_scan_roots.clone();
-        roots.extend(config.file_scan_extra_roots.iter().cloned());
-        roots.sort();
-        roots.dedup();
+        let roots = config.file_scan_root_list();
         let matchers = index::compile_ignored_matchers(&config.ignored_file_patterns);
 
         let mut candidates: Vec<Candidate> = Vec::new();

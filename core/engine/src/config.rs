@@ -198,6 +198,36 @@ impl RuntimeConfig {
         }
     }
 
+    /// Every directory the file walk covers, in the order it is walked.
+    ///
+    /// Folders the user added explicitly (`file_scan_extra_roots`, written by
+    /// the Settings screen) come first, then `file_scan_roots` in the order the
+    /// config lists them - the user's own entries ahead of the platform
+    /// defaults that [`Self::ensure_default_file_scan_roots_present`] appends.
+    ///
+    /// The order is load-bearing because `file_scan_limit` is a single budget
+    /// shared by the whole walk: whichever root is walked first spends it. The
+    /// walk used to sort the roots, which put `/root/Downloads` ahead of
+    /// `/root/zeidex-fixture` purely because `D` sorts before `z`, so a folder
+    /// the user had just added could be skipped entirely and never appear in
+    /// search. Order is deterministic either way; this is the order the user
+    /// asked for.
+    pub fn file_scan_root_list(&self) -> Vec<String> {
+        let mut roots =
+            Vec::with_capacity(self.file_scan_extra_roots.len() + self.file_scan_roots.len());
+        let mut seen = HashSet::new();
+        for root in self
+            .file_scan_extra_roots
+            .iter()
+            .chain(self.file_scan_roots.iter())
+        {
+            if seen.insert(root.clone()) {
+                roots.push(root.clone());
+            }
+        }
+        roots
+    }
+
     /// Returns the cached `RuntimeConfig`, reading from disk on first call only.
     /// Subsequent calls clone the cached value (cheap - the struct is plain
     /// data). Callers that mutate `~/.zeidex/config` at runtime must call
@@ -737,17 +767,6 @@ fn append_missing_default_config_entries(path: &Path) {
 fn default_config_contents() -> String {
     let app_roots = default_app_scan_roots().join(",");
     let file_roots = platform::file_scan_root_suffixes().join(",");
-    // Windows reads as too transparent at the macOS/Linux baseline of 0.55
-    // because we cannot use native Mica (the vibrancy DWM call breaks the
-    // CSS-clipped rounded corners) and the CSS blur alone doesn't fully
-    // anchor the launcher against busy desktops. Bump the first-launch
-    // default; existing configs are untouched (defaults only seed the
-    // initial file).
-    let tint_opacity = if cfg!(target_os = "windows") {
-        "0.85"
-    } else {
-        "0.55"
-    };
     format!(
         "# zeidex configuration\n\
 # Generated on first launch. Edit values, then restart Zeidex: the config is\n\
@@ -790,10 +809,6 @@ clipboard_filter_secrets=true\n\
 # range is ignored rather than turned into a deletion.\n\
 clipboard_retention_days=0\n\
 \n\
-# How long the main query survives while Zeidex is hidden, in seconds. 0 clears\n\
-# it on every hide; a negative value keeps it indefinitely.\n\
-query_retention_seconds=5\n\
-\n\
 # Preferred tools. Name the tool, not a command: Zeidex knows how to drive it,\n\
 # including running a terminal editor inside your terminal. Declare nothing and\n\
 # nothing changes. Editing uses text_editor on a file and code_editor on a\n\
@@ -803,25 +818,6 @@ query_retention_seconds=5\n\
 # code_editor=zed\n\
 # terminal=ghostty\n\
 # file_manager=nautilus\n\
-\n\
-# UI theme\n\
-ui_tint_red=0.08\n\
-ui_tint_green=0.10\n\
-ui_tint_blue=0.12\n\
-ui_tint_opacity={tint_opacity}\n\
-ui_blur_material=hudWindow\n\
-ui_blur_opacity=0.95\n\
-ui_font_name=SF Pro Text\n\
-ui_font_size=14\n\
-ui_font_red=0.96\n\
-ui_font_green=0.96\n\
-ui_font_blue=0.98\n\
-ui_font_opacity=0.96\n\
-ui_border_thickness=1.0\n\
-ui_border_red=1.0\n\
-ui_border_green=1.0\n\
-ui_border_blue=1.0\n\
-ui_border_opacity=0.12\n\
 \n\
 # Search aliases (apps + System Settings). Format: alias_<keyword>=Term1|Term2|Term3\n\
 # The defaults below cover both macOS and Windows app catalogs; entries that don't\n\
@@ -1930,7 +1926,6 @@ mod tests {
         assert!(contents.contains("app_scan_depth=9"));
         assert!(contents.contains("app_scan_roots=/Applications\n"));
         assert!(contents.contains("alias_note=Notion|Obsidian|Notes|Apple Notes|Bear|Logseq"));
-        assert!(contents.contains("query_retention_seconds=5"));
         assert_eq!(
             contents.matches("app_scan_depth=").count(),
             1,
@@ -1991,7 +1986,7 @@ mod tests {
     fn canonical_setting_rejects_unknown_keys_and_wrong_types() {
         // Keys that exist elsewhere but are not writable from the UI must be
         // refused rather than appended as lines the parser treats as unknown.
-        assert!(canonical_setting("query_retention_seconds", SettingValue::Bool(true)).is_err());
+        assert!(canonical_setting("ui_tint_opacity", SettingValue::Bool(true)).is_err());
         assert!(canonical_setting("alias_note", SettingValue::Bool(true)).is_err());
         assert!(canonical_setting("clipboard_filter_secrets", SettingValue::Integer(1)).is_err());
         assert!(canonical_setting("file_scan_depth", SettingValue::PathList(&[])).is_err());
@@ -2181,6 +2176,57 @@ clipboard_filter_secrets=false\r\n",
         let blank = vec!["  ".to_string()];
         assert!(
             canonical_setting("file_scan_extra_roots", SettingValue::PathList(&blank)).is_err()
+        );
+    }
+
+    /// Every key the generated config advertises must be read by the parser.
+    ///
+    /// A key written to `~/.zeidex/config` that no match arm handles reads as
+    /// "saved" and does nothing, which is worse than not offering it: the user
+    /// edits a documented setting and sees no effect. This guard has already
+    /// caught a block of `ui_*` keys left over from the native-vibrancy era.
+    #[test]
+    fn every_generated_config_key_is_parsed() {
+        // Keys with an explicit match arm. Keep in sync with `apply_from_file`.
+        const EXPLICIT: &[&str] = &[
+            "app_scan_roots",
+            "app_scan_depth",
+            "app_exclude_paths",
+            "app_exclude_names",
+            "file_scan_roots",
+            "file_scan_extra_roots",
+            "file_scan_depth",
+            "file_scan_limit",
+            "file_exclude_paths",
+            "skip_dir_names",
+            "lazy_indexing_enabled",
+            "localized_app_names",
+            "clipboard_history_limit",
+            "clipboard_filter_secrets",
+            "clipboard_retention_days",
+        ];
+        let contents = default_config_contents();
+        let mut unparsed = Vec::new();
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((key, _)) = line.split_once('=') else {
+                continue;
+            };
+            let key = key.trim();
+            let handled = EXPLICIT.contains(&key)
+                || key.starts_with("alias_")
+                || key.starts_with("ignored_patterns_")
+                || zeidex_tools::key::ALL.contains(&key);
+            if !handled {
+                unparsed.push(key.to_string());
+            }
+        }
+        assert!(
+            unparsed.is_empty(),
+            "these keys are written to the config but no parser arm reads them: {unparsed:?}"
         );
     }
 }

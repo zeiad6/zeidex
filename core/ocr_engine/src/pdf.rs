@@ -18,6 +18,68 @@ use crate::error::{OcrError, OcrResult};
 /// out the same handle is the architecture the library requires.
 static SHARED_PDFIUM: Mutex<Option<Arc<Pdfium>>> = Mutex::new(None);
 
+/// Serialises every call into the pdfium C library.
+///
+/// Binding the library once is necessary but not sufficient: pdfium keeps
+/// process-wide state that is not thread-safe, so two commands that both call
+/// it at the same time - the Studio rendering a preview while a PDF OCR run is
+/// paging through the same document, or two previews from a fast page switch -
+/// can corrupt that state or crash the process. The pipeline already renders a
+/// single document's pages sequentially; this lock extends the same guarantee
+/// across documents and across commands.
+///
+/// The guard is held for one FFI call, never for a whole OCR run: recognition
+/// is the expensive part and runs on rayon without the lock, so a preview only
+/// waits for the page being rendered.
+static PDFIUM_FFI: Mutex<()> = Mutex::new(());
+
+fn ffi_guard() -> std::sync::MutexGuard<'static, ()> {
+    PDFIUM_FFI
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A PDF document whose close is serialised with every other pdfium call.
+///
+/// `PdfDocument` releases its handle in `Drop`, and that release is an FFI call
+/// like any other: closing a document while another thread is rendering it
+/// frees the handle underneath the renderer. Owning the document through this
+/// wrapper makes the lock part of the type, so no caller can forget it.
+pub struct SharedDocument<'a> {
+    inner: Option<PdfDocument<'a>>,
+}
+
+impl<'a> std::ops::Deref for SharedDocument<'a> {
+    type Target = PdfDocument<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        // `inner` is `Some` for the whole life of the value: only `Drop` takes
+        // it, and no deref can run once `Drop` has started.
+        match self.inner.as_ref() {
+            Some(document) => document,
+            None => unreachable!("a closed document was dereferenced"),
+        }
+    }
+}
+
+impl Drop for SharedDocument<'_> {
+    fn drop(&mut self) {
+        let _guard = ffi_guard();
+        drop(self.inner.take());
+    }
+}
+
+/// Opens a PDF under the process-wide pdfium lock.
+pub fn load_document<'a>(pdfium: &'a Pdfium, path: &Path) -> OcrResult<SharedDocument<'a>> {
+    let _guard = ffi_guard();
+    let document = pdfium
+        .load_pdf_from_file(path, None)
+        .map_err(|err| OcrError::Pdf(err.to_string()))?;
+    Ok(SharedDocument {
+        inner: Some(document),
+    })
+}
+
 /// Returns the shared pdfium handle, binding on first use.
 ///
 /// `library_path` is only consulted for the first successful bind: pdfium can
@@ -38,6 +100,11 @@ pub fn shared_pdfium(library_path: Option<&Path>) -> OcrResult<Option<Arc<Pdfium
         return Ok(Some(Arc::clone(existing)));
     }
 
+    // Loading the shared library and initialising it touches the same
+    // process-wide state as a render, so it waits for any in-flight call. The
+    // lock order here is SHARED_PDFIUM then PDFIUM_FFI; no other path takes
+    // them in the opposite order, so this cannot deadlock.
+    let _ffi = ffi_guard();
     let bindings = match library_path {
         Some(path) => match Pdfium::bind_to_library(path) {
             Ok(bindings) => bindings,
@@ -72,6 +139,7 @@ pub fn shared_pdfium(library_path: Option<&Path>) -> OcrResult<Option<Arc<Pdfium
 }
 
 pub fn page_count(document: &PdfDocument<'_>) -> i32 {
+    let _guard = ffi_guard();
     document.pages().len()
 }
 
@@ -99,6 +167,7 @@ pub fn native_page_text(
     page_index: i32,
     dpi: f32,
 ) -> OcrResult<NativePage> {
+    let _guard = ffi_guard();
     let page = document
         .pages()
         .get(page_index)
@@ -122,6 +191,7 @@ pub fn render_document_page(
     page_index: i32,
     dpi: f32,
 ) -> OcrResult<DynamicImage> {
+    let _guard = ffi_guard();
     let page = document
         .pages()
         .get(page_index)
