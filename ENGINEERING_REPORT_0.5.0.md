@@ -167,7 +167,7 @@ the 0.4.0 file was restored from the verified copy
 
 ## K. GitHub release
 
-The source is pushed to `origin/main` and tagged `v0.5.0`. The `Release`
-workflow builds the Windows and Linux x64 bundles from that tag and attaches
-them to a draft release; the arm64 deb built here is attached to the same
-release. Nothing in the 0.4.0 release is replaced.
+Release commit `d591796`; the source is pushed to `origin/main` and tagged
+`v0.5.0`. The `Release` workflow builds the Windows and Linux x64 bundles from
+that tag and attaches them to a draft release; the arm64 deb built here is
+attached to the same release. Nothing in the 0.4.0 release is replaced.
