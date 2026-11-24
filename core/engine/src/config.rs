@@ -469,6 +469,16 @@ impl RuntimeConfig {
         self.rebuild_exclusions();
     }
 
+    /// Replaces the rule list and recompiles its matcher.
+    ///
+    /// The parser does this after reading the config file; a caller that builds
+    /// a `RuntimeConfig` in memory needs the same guarantee, or the rules would
+    /// be stored but never enforced.
+    pub fn set_exclusions(&mut self, exclusions: Vec<crate::exclusions::Exclusion>) {
+        self.exclusions = exclusions;
+        self.rebuild_exclusions();
+    }
+
     /// Recompiles the matcher from `exclusions`. Called once after the file is
     /// parsed, so a walk never compiles a glob per candidate.
     fn rebuild_exclusions(&mut self) {

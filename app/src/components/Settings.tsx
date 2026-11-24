@@ -10,6 +10,7 @@ import {
   type UpdateInfo,
 } from "../api";
 import type { IndexStatus } from "../index-status";
+import { indexHealth, type IndexHealth } from "../index-health";
 import {
   diff,
   toDraft,
@@ -43,6 +44,45 @@ type Section =
   | "performance"
   | "privacy"
   | "about";
+
+const HEALTH_LABELS: Record<IndexHealth, { en: string; ar: string }> = {
+  healthy: { en: "Healthy", ar: "سليم" },
+  updating: { en: "Updating", ar: "قيد التحديث" },
+  "needs-refresh": { en: "Needs refresh", ar: "يحتاج تحديثًا" },
+  partial: { en: "Partial", ar: "جزئي" },
+  error: { en: "Error", ar: "خطأ" },
+};
+
+const HEALTH_COPY: Record<IndexHealth, { en: string; ar: string }> = {
+  healthy: {
+    en: "The last walk finished and the index agrees with your exclusion rules.",
+    ar: "انتهى آخر مسح، والفهرس متوافق مع قواعد الاستبعاد.",
+  },
+  updating: {
+    en: "A walk is running. The count settles when it finishes.",
+    ar: "هناك مسح جارٍ. يستقر العدد عند انتهائه.",
+  },
+  "needs-refresh": {
+    en: "Nothing is indexed yet. Reindex to populate the index.",
+    ar: "لا توجد عناصر مفهرسة بعد. أعد الفهرسة لتعبئة الفهرس.",
+  },
+  partial: {
+    en: "The walk is paused. The index keeps what it reached.",
+    ar: "المسح متوقف مؤقتًا. يحتفظ الفهرس بما وصل إليه.",
+  },
+  error: {
+    en: "The last walk reported an error. Its message is shown below.",
+    ar: "أبلغ آخر مسح عن خطأ. تظهر رسالته أدناه.",
+  },
+};
+
+const HEALTH_TONE: Record<IndexHealth, string> = {
+  healthy: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
+  updating: "border-sky-400/25 bg-sky-400/10 text-sky-300",
+  "needs-refresh": "border-amber-400/25 bg-amber-400/10 text-amber-300",
+  partial: "border-amber-400/25 bg-amber-400/10 text-amber-300",
+  error: "border-rose-400/25 bg-rose-400/10 text-rose-300",
+};
 
 const SECTIONS: { id: Section; label: string; labelAr: string; icon: IconName }[] = [
   { id: "general", label: "General", labelAr: "عام", icon: "home" },
@@ -236,6 +276,25 @@ export default function Settings({
   // pause controls belong to the worker's walk, not to this component's flag.
   const busy = indexing || (indexStatus?.indexing ?? false);
   const paused = indexStatus?.paused ?? false;
+  // Before the first status event the settings snapshot carries the same count
+  // the footer would show, so the health card is honest instead of blank. The
+  // count always comes from `settings`, because local actions ("delete index")
+  // change it before the worker reports again; a stale status must not keep
+  // calling an emptied index healthy.
+  const health = indexHealth(
+    indexStatus
+      ? { ...indexStatus, count: settings?.candidateCount ?? indexStatus.count }
+      : settings
+        ? {
+            indexing: false,
+            paused: false,
+            count: settings.candidateCount,
+            skipped: 0,
+            error: null,
+          }
+        : null,
+  );
+  const skippedByRules = indexStatus?.skipped ?? 0;
   // The worker is the source of truth for the count; a watcher refresh or a
   // settings-triggered rebuild updates this panel without a reload. The ref is
   // what stops a slower `settingsSnapshot` from writing an older count over a
@@ -1006,6 +1065,39 @@ export default function Settings({
                 "الفهرس محلي. الحدود تحدّ من عمق المسح وحجمه، وتُحفظ في ملف الإعدادات وتُطبَّق عند إعادة الفهرسة.",
               )}
             />
+            <Card>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[0.82rem] font-medium text-zinc-100">
+                    {t("Index health", "حالة الفهرس")}
+                  </p>
+                  <p className="mt-0.5 text-[0.72rem] leading-relaxed text-zinc-500">
+                    {t(HEALTH_COPY[health].en, HEALTH_COPY[health].ar)}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full border px-2.5 py-1 text-[0.7rem] font-medium ${HEALTH_TONE[health]}`}
+                >
+                  {t(HEALTH_LABELS[health].en, HEALTH_LABELS[health].ar)}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 border-t border-white/[0.06] pt-3 text-[0.72rem]">
+                <div>
+                  <p className="text-zinc-500">{t("Indexed entries", "عناصر الفهرس")}</p>
+                  <p className="mt-0.5 font-medium text-zinc-200">
+                    {(settings?.candidateCount ?? 0).toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-zinc-500">
+                    {t("Skipped by your rules (last walk)", "مستبعدة بقواعدك (آخر مسح)")}
+                  </p>
+                  <p className="mt-0.5 font-medium text-zinc-200">
+                    {skippedByRules.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </Card>
             <Card>
               <NumberField
                 id="scan-depth"

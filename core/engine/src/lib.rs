@@ -292,7 +292,10 @@ impl QueryEngine {
         // A walk that is already cancelled must not clear the demo rows or
         // touch a single candidate.
         if !control.checkpoint() {
-            return Ok(BootstrapOutcome::Cancelled { discovered: 0 });
+            return Ok(BootstrapOutcome::Cancelled {
+                discovered: 0,
+                skipped: 0,
+            });
         }
 
         if store.is_demo_seeded()? {
@@ -300,12 +303,13 @@ impl QueryEngine {
             store.replace_candidates(&[])?;
         }
 
-        let (rx, producer_handle) = index::discover_candidates_stream_controlled(
+        let stream = index::discover_candidates_stream_controlled(
             runtime_config,
             scope,
             Some(std::sync::Arc::clone(control)),
-        )
-        .into_parts();
+        );
+        let skipped_counter = std::sync::Arc::clone(&stream.skipped);
+        let (rx, producer_handle) = stream.into_parts();
         let mut seen = HashSet::new();
         let mut chunk = Vec::with_capacity(INDEX_UPSERT_CHUNK_SIZE);
         let mut discovered_count = 0usize;
@@ -336,9 +340,13 @@ impl QueryEngine {
             eprintln!("zeidex index: producer worker panicked: {err:?}");
         }
 
+        // The producer has joined, so the counter is final for this walk.
+        let skipped = skipped_counter.load(std::sync::atomic::Ordering::Relaxed);
+
         if cancelled {
             return Ok(BootstrapOutcome::Cancelled {
                 discovered: discovered_count,
+                skipped,
             });
         }
 
@@ -358,6 +366,7 @@ impl QueryEngine {
 
         Ok(BootstrapOutcome::Complete {
             discovered: discovered_count,
+            skipped,
         })
     }
 
@@ -624,17 +633,28 @@ pub struct RefreshOutcome {
 /// How a full walk ended. `discovered` is what the walk produced and wrote, not
 /// what the database holds: a cancelled walk keeps the rows it did not reach, so
 /// the total is larger than this number by design.
+///
+/// `skipped` is the traversal-boundary count: entries the user's exclusion
+/// rules rejected before they were read. A pruned directory counts once, not
+/// once per descendant, because the walker never entered it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootstrapOutcome {
-    Complete { discovered: usize },
-    Cancelled { discovered: usize },
+    Complete { discovered: usize, skipped: usize },
+    Cancelled { discovered: usize, skipped: usize },
 }
 
 impl BootstrapOutcome {
     pub fn discovered(self) -> usize {
         match self {
-            BootstrapOutcome::Complete { discovered } => discovered,
-            BootstrapOutcome::Cancelled { discovered } => discovered,
+            BootstrapOutcome::Complete { discovered, .. }
+            | BootstrapOutcome::Cancelled { discovered, .. } => discovered,
+        }
+    }
+
+    pub fn skipped(self) -> usize {
+        match self {
+            BootstrapOutcome::Complete { skipped, .. }
+            | BootstrapOutcome::Cancelled { skipped, .. } => skipped,
         }
     }
 

@@ -98,7 +98,10 @@ fn a_cancelled_walk_keeps_the_rows_it_never_reached() {
     let first = fixture.run(&config, &IndexControl::shared());
     assert_eq!(
         first,
-        BootstrapOutcome::Complete { discovered: 3 },
+        BootstrapOutcome::Complete {
+            discovered: 3,
+            skipped: 0
+        },
         "the first walk indexes the three files"
     );
     assert_eq!(fixture.paths().len(), 3);
@@ -111,7 +114,13 @@ fn a_cancelled_walk_keeps_the_rows_it_never_reached() {
     cancelled.cancel();
 
     let outcome = fixture.run(&config, &cancelled);
-    assert_eq!(outcome, BootstrapOutcome::Cancelled { discovered: 0 });
+    assert_eq!(
+        outcome,
+        BootstrapOutcome::Cancelled {
+            discovered: 0,
+            skipped: 0
+        }
+    );
     assert!(
         outcome.was_cancelled(),
         "the caller must be able to tell a stopped walk from a finished one"
@@ -128,7 +137,13 @@ fn a_cancelled_walk_keeps_the_rows_it_never_reached() {
     // guard), so let the clock cross one boundary before asking it to.
     std::thread::sleep(std::time::Duration::from_millis(1100));
     let outcome = fixture.run(&config, &IndexControl::shared());
-    assert_eq!(outcome, BootstrapOutcome::Complete { discovered: 2 });
+    assert_eq!(
+        outcome,
+        BootstrapOutcome::Complete {
+            discovered: 2,
+            skipped: 0
+        }
+    );
     let paths = fixture.paths();
     assert_eq!(paths.len(), 2, "the deleted file is swept: {paths:?}");
     assert!(
@@ -172,6 +187,47 @@ fn a_paused_walk_resumes_where_it_stopped() {
 
     control.resume();
     let outcome = handle.join().expect("walk thread");
-    assert_eq!(outcome, BootstrapOutcome::Complete { discovered: 4 });
+    assert_eq!(
+        outcome,
+        BootstrapOutcome::Complete {
+            discovered: 4,
+            skipped: 0
+        }
+    );
     assert_eq!(fixture.paths().len(), 4, "and finishes the whole walk");
+}
+
+#[test]
+fn a_folder_rule_prunes_before_descending_and_is_counted() {
+    let fixture = Fixture::new("exclusion-count");
+    let mut config = fixture.config();
+    fixture.write("keep.txt");
+    let pruned = fixture.root.join("skipme");
+    std::fs::create_dir_all(&pruned).expect("create pruned folder");
+    std::fs::write(pruned.join("child.txt"), "x").expect("write child");
+    std::fs::write(pruned.join("grandchild.txt"), "x").expect("write grandchild");
+
+    config.set_exclusions(vec![zeidex_engine::exclusions::Exclusion::new(
+        "test-folder",
+        zeidex_engine::exclusions::ExclusionKind::Folder,
+        pruned.to_string_lossy().into_owned(),
+        0,
+    )]);
+
+    let outcome = fixture.run(&config, &IndexControl::shared());
+
+    assert_eq!(
+        outcome.skipped(),
+        1,
+        "the pruned folder counts once, not once per descendant"
+    );
+    let paths = fixture.paths();
+    assert!(
+        paths.iter().any(|path| path.ends_with("keep.txt")),
+        "the sibling is still indexed: {paths:?}"
+    );
+    assert!(
+        paths.iter().all(|path| !path.contains("skipme")),
+        "nothing under the excluded folder reaches the database: {paths:?}"
+    );
 }

@@ -5,6 +5,8 @@ use crate::platform::paths::{
 };
 use globset::{GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::UNIX_EPOCH;
 use zeidex_indexing::{Candidate, CandidateKind, IndexControl};
@@ -33,18 +35,32 @@ struct WalkLimit<'a> {
     control: Option<&'a IndexControl>,
 }
 
+/// The two budgets a walk spends. Bundled so the recursive call keeps a
+/// readable signature and the file limit is checked in one place.
+#[derive(Default)]
+struct WalkTally {
+    files: usize,
+    folders: usize,
+}
+
+/// Walks every configured root and streams the candidates it finds.
+///
+/// `skipped` counts one per entry the user's exclusion rules rejected at the
+/// traversal boundary: a pruned directory counts once, not once per descendant,
+/// because the walker never entered it. That is the number the Indexing screen
+/// can honestly show as "entries skipped before they cost a stat".
 pub fn discover_local_files_and_folders(
     config: &RuntimeConfig,
     tx: mpsc::SyncSender<Candidate>,
     control: Option<&IndexControl>,
+    skipped: Arc<AtomicUsize>,
 ) {
     let roots = config.file_scan_root_list();
 
     // Compile the ignore matchers once, not once per root.
     let ignored_file_matchers = build_ignored_matchers(&config.ignored_file_patterns);
 
-    let mut file_count = 0usize;
-    let mut folder_count = 0usize;
+    let mut tally = WalkTally::default();
     for root in &roots {
         // A pause between roots parks the walk instead of spinning: the
         // checkpoint blocks on the control's condition variable.
@@ -56,11 +72,11 @@ pub fn discover_local_files_and_folders(
             config,
             &ignored_file_matchers,
             &tx,
-            &mut file_count,
-            &mut folder_count,
+            &mut tally,
             control,
+            &skipped,
         );
-        if file_count >= config.file_scan_limit {
+        if tally.files >= config.file_scan_limit {
             break;
         }
     }
@@ -71,21 +87,21 @@ fn walk_files(
     config: &RuntimeConfig,
     ignored_file_matchers: &IgnoredFileMatchers,
     tx: &mpsc::SyncSender<Candidate>,
-    file_count: &mut usize,
-    folder_count: &mut usize,
+    tally: &mut WalkTally,
     control: Option<&IndexControl>,
+    skipped: &Arc<AtomicUsize>,
 ) {
     walk_files_with_depth(
         path,
         config,
         ignored_file_matchers,
         tx,
-        file_count,
-        folder_count,
+        tally,
         WalkLimit {
             max_depth: config.file_scan_depth,
             control,
         },
+        skipped,
     );
 }
 
@@ -98,9 +114,9 @@ fn walk_files_with_depth(
     config: &RuntimeConfig,
     ignored_file_matchers: &IgnoredFileMatchers,
     tx: &mpsc::SyncSender<Candidate>,
-    file_count: &mut usize,
-    folder_count: &mut usize,
+    tally: &mut WalkTally,
     limit: WalkLimit<'_>,
+    skipped: &Arc<AtomicUsize>,
 ) {
     let WalkLimit { max_depth, control } = limit;
     if should_exclude_path(path, &config.file_exclude_paths) {
@@ -112,6 +128,7 @@ fn walk_files_with_depth(
     let exclude_paths = config.file_exclude_paths.clone();
     let skip_dir_names = config.skip_dir_names.clone();
     let exclusions = config.exclusion_set.clone();
+    let skipped = Arc::clone(skipped);
     walker
         .hidden(false)
         .git_ignore(false)
@@ -145,6 +162,10 @@ fn walk_files_with_depth(
                 name,
                 entry.file_type().is_some_and(|t| t.is_dir()),
             ) {
+                // One per boundary: the walker never descends into a pruned
+                // directory, so counting descendants here would require the
+                // traversal this feature exists to avoid.
+                skipped.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
 
@@ -164,7 +185,7 @@ fn walk_files_with_depth(
         });
 
     for entry in walker.build().flatten() {
-        if *file_count >= config.file_scan_limit {
+        if tally.files >= config.file_scan_limit {
             break;
         }
         // One atomic load per entry on the normal path; a paused or cancelled
@@ -191,13 +212,13 @@ fn walk_files_with_depth(
 
         if metadata.is_dir() {
             // Folders don't count toward the file limit; they get their own.
-            if *folder_count >= config.file_scan_limit.saturating_mul(FOLDER_BUDGET_FACTOR) {
+            if tally.folders >= config.file_scan_limit.saturating_mul(FOLDER_BUDGET_FACTOR) {
                 continue;
             }
             if let Some(candidate) =
                 candidate_from_metadata(config, &path_buf, &metadata, ignored_file_matchers)
             {
-                *folder_count += 1;
+                tally.folders += 1;
                 let _ = tx.send(candidate);
             }
             continue;
@@ -207,7 +228,7 @@ fn walk_files_with_depth(
             && let Some(candidate) =
                 candidate_from_metadata(config, &path_buf, &metadata, ignored_file_matchers)
         {
-            *file_count += 1;
+            tally.files += 1;
             let _ = tx.send(candidate);
         }
     }
@@ -316,19 +337,18 @@ pub(crate) fn walk_children(
     out: &mut Vec<Candidate>,
 ) {
     let (tx, rx) = mpsc::sync_channel(1024);
-    let mut file_count = 0usize;
-    let mut folder_count = 0usize;
+    let mut tally = WalkTally::default();
     walk_files_with_depth(
         path,
         config,
         ignored_file_matchers,
         &tx,
-        &mut file_count,
-        &mut folder_count,
+        &mut tally,
         WalkLimit {
             max_depth,
             control: None,
         },
+        &Arc::new(AtomicUsize::new(0)),
     );
     drop(tx);
     out.extend(rx);
@@ -377,6 +397,8 @@ mod tests {
     use super::{discover_local_files_and_folders, should_exclude_path};
     use crate::config::RuntimeConfig;
     use crate::platform::paths::compile_ignore_matcher;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
     use zeidex_indexing::CandidateKind;
 
@@ -473,7 +495,7 @@ mod tests {
             ..Default::default()
         };
         let (tx, rx) = mpsc::sync_channel(64);
-        discover_local_files_and_folders(&config, tx, None);
+        discover_local_files_and_folders(&config, tx, None, Arc::new(AtomicUsize::new(0)));
         let walked = rx
             .try_iter()
             .map(|candidate| candidate.path)
@@ -503,7 +525,7 @@ mod tests {
             ..Default::default()
         };
         let (tx, rx) = mpsc::sync_channel(64);
-        discover_local_files_and_folders(&config, tx, None);
+        discover_local_files_and_folders(&config, tx, None, Arc::new(AtomicUsize::new(0)));
         let walked = rx.try_iter().collect::<Vec<_>>();
         assert!(walked.len() >= 3, "fixture should produce rows: {walked:?}");
 
@@ -595,7 +617,7 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::sync_channel(128);
-        discover_local_files_and_folders(&config, tx, None);
+        discover_local_files_and_folders(&config, tx, None, Arc::new(AtomicUsize::new(0)));
         let candidates = rx.try_iter().collect::<Vec<_>>();
 
         assert!(candidates.iter().any(|candidate| {
@@ -634,7 +656,7 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::sync_channel(32);
-        discover_local_files_and_folders(&config, tx, None);
+        discover_local_files_and_folders(&config, tx, None, Arc::new(AtomicUsize::new(0)));
         let candidates = rx.try_iter().collect::<Vec<_>>();
 
         let file_titles = candidates
@@ -668,7 +690,7 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::sync_channel(32);
-        discover_local_files_and_folders(&config, tx, None);
+        discover_local_files_and_folders(&config, tx, None, Arc::new(AtomicUsize::new(0)));
         let candidates = rx.try_iter().collect::<Vec<_>>();
 
         assert!(

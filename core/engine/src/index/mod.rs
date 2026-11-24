@@ -8,6 +8,7 @@ pub(crate) use files::{candidate_for_path, compile_ignored_matchers, walk_childr
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
 use std::thread;
 use zeidex_indexing::{Candidate, CandidateIdKind, IndexControl};
@@ -22,6 +23,10 @@ pub(super) const SETTINGS_CANDIDATE_ID_PREFIX: &str = CandidateIdKind::PREFIX_SE
 pub struct CandidateDiscoveryStream {
     pub rx: mpsc::Receiver<Candidate>,
     producer_handle: thread::JoinHandle<()>,
+    /// Entries the user's exclusion rules pruned before they were read. Read
+    /// after the producer joins; the walker increments it, so a reader that
+    /// samples early sees a lower bound, never a wrong final value.
+    pub skipped: Arc<AtomicUsize>,
 }
 
 pub fn discover_candidates_stream(config: &RuntimeConfig) -> CandidateDiscoveryStream {
@@ -49,6 +54,8 @@ pub fn discover_candidates_stream_controlled(
 ) -> CandidateDiscoveryStream {
     let (tx, rx) = mpsc::sync_channel(INDEX_CHANNEL_CAPACITY);
     let config = config.clone();
+    let skipped = Arc::new(AtomicUsize::new(0));
+    let files_skipped = Arc::clone(&skipped);
     let producer_handle = thread::spawn(move || {
         let files_handle = if scope.files {
             let files_config = config.clone();
@@ -59,6 +66,7 @@ pub fn discover_candidates_stream_controlled(
                     &files_config,
                     files_tx,
                     files_control.as_deref(),
+                    files_skipped,
                 );
             }))
         } else {
@@ -96,6 +104,7 @@ pub fn discover_candidates_stream_controlled(
     CandidateDiscoveryStream {
         rx,
         producer_handle,
+        skipped,
     }
 }
 

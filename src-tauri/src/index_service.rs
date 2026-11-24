@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -26,6 +26,9 @@ use crate::state::AppState;
 #[derive(Clone, Debug, Serialize)]
 pub struct IndexStatus {
     pub indexing: bool,
+    /// Entries the user's exclusion rules pruned in the last completed walk.
+    /// A pruned directory counts once, not once per descendant.
+    pub skipped: usize,
     /// True while the running walk is parked on the user's request. The UI uses
     /// it to show Resume instead of Pause, and the footer to say why the count
     /// stopped moving.
@@ -73,6 +76,9 @@ struct WorkerShared {
     /// switch that would park the next one.
     walking: Arc<AtomicBool>,
     control: Arc<IndexControl>,
+    /// Last completed walk's exclusion-pruned entry count, shared with the
+    /// status emitter so every event carries it.
+    skipped: Arc<AtomicUsize>,
 }
 
 /// A clonable handle to the worker. Cloning shares the same channel and flags.
@@ -108,6 +114,7 @@ impl IndexService {
         let rerun = Arc::new(AtomicBool::new(false));
         let control = IndexControl::shared();
         let walking = Arc::new(AtomicBool::new(false));
+        let skipped = Arc::new(AtomicUsize::new(0));
 
         let worker_tx = tx.clone();
         let shared = WorkerShared {
@@ -116,6 +123,7 @@ impl IndexService {
             rerun: rerun.clone(),
             walking: walking.clone(),
             control: control.clone(),
+            skipped: skipped.clone(),
         };
         if let Err(err) = thread::Builder::new()
             .name("zeidex-index".to_string())
@@ -285,6 +293,7 @@ fn run_worker(
         rerun,
         walking,
         control,
+        skipped,
     } = shared;
     let mut watch: Option<WatchHandle> = None;
     // Why live updates are off or partial, if they are. Kept for the life of
@@ -303,6 +312,7 @@ fn run_worker(
                     &app,
                     IndexStatus {
                         indexing: true,
+                        skipped: skipped.load(Ordering::Relaxed),
                         paused: false,
                         count: current_count(&app),
                         error: status_error(watch_warning.as_deref(), None),
@@ -327,13 +337,15 @@ fn run_worker(
                     &control,
                 );
                 match result {
-                    Ok(BootstrapOutcome::Complete { .. }) => {
+                    Ok(outcome @ BootstrapOutcome::Complete { .. }) => {
+                        skipped.store(outcome.skipped(), Ordering::Release);
                         built.store(true, Ordering::Release);
                         let count = reload_count(&app);
                         emit(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                skipped: skipped.load(Ordering::Relaxed),
                                 paused: false,
                                 count,
                                 error: status_error(watch_warning.as_deref(), None),
@@ -343,7 +355,7 @@ fn run_worker(
                             let _ = reply.send(Ok(count));
                         }
                     }
-                    Ok(BootstrapOutcome::Cancelled { discovered }) => {
+                    Ok(BootstrapOutcome::Cancelled { discovered, .. }) => {
                         // Not an error: the user asked to stop. The rows already
                         // written stay, and the rows not reached are still in
                         // the database, so `built` is unchanged and the count is
@@ -353,6 +365,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                skipped: skipped.load(Ordering::Relaxed),
                                 paused: false,
                                 count,
                                 error: status_error(watch_warning.as_deref(), None),
@@ -372,6 +385,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                skipped: skipped.load(Ordering::Relaxed),
                                 paused: false,
                                 count: current_count(&app),
                                 error: status_error(
@@ -403,6 +417,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                skipped: skipped.load(Ordering::Relaxed),
                                 paused: false,
                                 count,
                                 error: status_error(watch_warning.as_deref(), None),
@@ -416,6 +431,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                skipped: skipped.load(Ordering::Relaxed),
                                 paused: false,
                                 count: current_count(&app),
                                 error: status_error(watch_warning.as_deref(), Some(message)),
@@ -434,6 +450,7 @@ fn run_worker(
                     &app,
                     IndexStatus {
                         indexing,
+                        skipped: skipped.load(Ordering::Relaxed),
                         paused: indexing && matches!(control.state(), IndexRun::Paused),
                         count,
                         error: status_error(watch_warning.as_deref(), None),
@@ -453,6 +470,7 @@ fn run_worker(
                                 &app,
                                 IndexStatus {
                                     indexing: false,
+                                    skipped: skipped.load(Ordering::Relaxed),
                                     paused: false,
                                     count,
                                     error: status_error(watch_warning.as_deref(), None),
@@ -467,6 +485,7 @@ fn run_worker(
                             &app,
                             IndexStatus {
                                 indexing: false,
+                                skipped: skipped.load(Ordering::Relaxed),
                                 paused: false,
                                 count: current_count(&app),
                                 error: status_error(watch_warning.as_deref(), Some(message)),
@@ -493,6 +512,7 @@ fn run_worker(
                         &app,
                         IndexStatus {
                             indexing: false,
+                            skipped: skipped.load(Ordering::Relaxed),
                             paused: control.state() == IndexRun::Paused,
                             count: current_count(&app),
                             error: status_error(watch_warning.as_deref(), None),

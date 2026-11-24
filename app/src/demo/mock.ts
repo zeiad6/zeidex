@@ -653,6 +653,20 @@ export function installMock() {
         // `?demo=1&update=1` makes the mock announce a release newer than this
         // build, so the notification toast can be reviewed without cutting a
         // release. Dev-only, like the rest of this file.
+        // The real shell emits this whenever the worker changes state; the
+        // demo has no worker, so one fixture event gives the Indexing screen
+        // the same shape (count, health and the exclusion counter) to review.
+        if (event === "zeidex://index-status") {
+          window.setTimeout(() => {
+            emit("zeidex://index-status", {
+              indexing: false,
+              paused: false,
+              count: demoSettings.candidateCount,
+              skipped: 37,
+              error: null,
+            });
+          }, 400);
+        }
         if (
           event === "zeidex://update" &&
           new URLSearchParams(window.location.search).get("update") === "1"

@@ -28,6 +28,7 @@
     "src/documents.test.ts",
     "src/file-format.ts",
     "src/file-format.test.ts",
+    "src/index-health.test.ts",
     "src/index-status.ts",
     "src/match-kind.ts",
     "src/match-kind.test.ts",

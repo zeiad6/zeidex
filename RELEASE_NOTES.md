@@ -109,18 +109,23 @@ The settings screens were mostly promises. This pass makes them real:
 - **Settings is eleven sections, not one long page**, with a filter box that
   matches English and Arabic labels, grouped cards, inline validation and a
   confirmation before anything destructive.
+- **The index says how it is.** Settings > Indexing derives a health label
+  (healthy, updating, needs refresh, partial, error) from the worker's own
+  status, and reports how many entries your exclusion rules pruned in the last
+  walk. That count comes from the walker, not an estimate: a pruned folder
+  counts once because its children are never read.
 
 ### Verified in this release
 
 | Gate | Result |
 | --- | --- |
-| Core tests | 631 passed, 0 failed |
+| Core tests | 632 passed, 0 failed |
 | Shell tests | 92 passed, 0 failed |
-| Frontend tests | 102 passed, 0 failed |
+| Frontend tests | 109 passed, 0 failed |
 | TypeScript + Vite build | clean |
 | Clippy + rustfmt (core, shell) | clean, 0 warnings |
 | Arabic OCR corpus | CER 0.60 %, WER 3.45 % |
-| Accessibility (axe-core 4.10.2) | 0 violations across 14 screens: launcher, welcome, General, Exclusions, Startup, Privacy and About; light, dark and RTL |
+| Accessibility (axe-core 4.10.2) | 0 violations across 16 screens: launcher, welcome, General, Indexing, Exclusions, Startup, Privacy and About; light, dark and RTL |
 | Package | `make deb` produced `Zeidex Search_0.4.0_arm64.deb` (52.85 MiB); metadata and extracted binary inspected |
 
 The Windows runtime, the MSI/NSIS installers, the Windows autostart entry and

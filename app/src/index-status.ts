@@ -11,6 +11,8 @@ export interface IndexStatus {
   /** The running walk is parked on the user's request. */
   paused: boolean;
   count: number;
+  /** Entries the user's rules pruned in the last completed walk. */
+  skipped: number;
   error: string | null;
 }
 
@@ -30,6 +32,14 @@ export function parseIndexStatus(payload: unknown): IndexStatus | null {
     // paused" is the only safe reading, and the footer must still render.
     paused: record.paused === true,
     count: Math.trunc(record.count),
+    // A shell built before the counter existed sends no field; zero is the
+    // only safe reading and keeps the health card renderable.
+    skipped:
+      typeof record.skipped === "number" &&
+      Number.isFinite(record.skipped) &&
+      record.skipped >= 0
+        ? Math.trunc(record.skipped)
+        : 0,
     error: typeof record.error === "string" ? record.error : null,
   };
 }
