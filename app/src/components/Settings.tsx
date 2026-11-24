@@ -1691,6 +1691,7 @@ export default function Settings({
                 rows={[
                   { label: t("Application", "التطبيق"), value: diagnostics?.app.name ?? "Zeidex Search", mono: false },
                   { label: t("Developer", "المطوّر"), value: diagnostics?.app.developer ?? "Zeidexsoft", mono: false },
+                  { label: t("Maintainer", "المشرف"), value: diagnostics?.app.maintainer ?? "@zeiad6", mono: true },
                   { label: t("Version", "الإصدار"), value: diagnostics?.app.version ?? settings.version, mono: true },
                   { label: t("Build", "نوع البناء"), value: diagnostics?.app.build ?? "—", mono: true },
                   { label: t("Tauri runtime", "إطار Tauri"), value: diagnostics?.app.tauri ?? "—", mono: true },
@@ -1720,6 +1721,18 @@ export default function Settings({
                 >
                   <Icon name="external" size={12} />
                   {t("GitHub", "GitHub")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void api.openUrl(
+                      diagnostics?.app.developerCard ?? "https://zeidexlink.zeidexsoft.com/zeidex",
+                    )
+                  }
+                  className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-xs text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  <Icon name="external" size={12} />
+                  {t("Developer card", "بطاقة المطوّر")}
                 </button>
               </div>
             </Card>

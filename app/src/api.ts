@@ -553,8 +553,10 @@ export interface DiagnosticsSnapshot {
     build: string;
     tauri: string;
     developer: string;
+    maintainer: string;
     website: string;
     repository: string;
+    developerCard: string;
     license: string;
     copyright: string;
   };

@@ -262,8 +262,15 @@ pub fn index_clear(app: AppHandle) -> Result<usize, String> {
 /// indexed and findable, but the ranking stops using what the user launched
 /// before. Nothing else in the database is touched.
 #[tauri::command(async)]
-pub fn search_history_clear(state: State<'_, AppState>) -> Result<usize, String> {
-    QueryEngine::clear_usage_history(&state.db_path).map_err(|err| err.to_string())
+pub fn search_history_clear(app: AppHandle) -> Result<usize, String> {
+    let state = app.state::<AppState>();
+    let removed =
+        QueryEngine::clear_usage_history(&state.db_path).map_err(|err| err.to_string())?;
+    // The ranker reads the counters from the in-memory engine, not from the
+    // database per query. Reloading here is what makes the action visible
+    // before the next restart.
+    state.reload_engine();
+    Ok(removed)
 }
 
 #[cfg(test)]

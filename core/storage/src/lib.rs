@@ -1305,8 +1305,21 @@ impl SqliteStore {
     /// This is the Privacy screen's "clear search history": the candidate rows
     /// stay, so search keeps working, but the record of what the user launched
     /// and when is gone.
+    /// Deletes the launch history and resets the counters it fed.
+    ///
+    /// Clearing only `usage_events` would leave `candidates.use_count` and
+    /// `last_used_at_unix_s` in place, and the ranker reads those columns —
+    /// the "clear search history" action would then change nothing the user
+    /// can observe. Both are cleared in one transaction so a crash cannot
+    /// leave a half-forgotten history.
     pub fn clear_usage_events(&mut self) -> StorageResult<usize> {
-        let removed = self.conn.execute("DELETE FROM usage_events", [])?;
+        let tx = self.write_tx()?;
+        let removed = tx.execute("DELETE FROM usage_events", [])?;
+        tx.execute(
+            "UPDATE candidates SET use_count = 0, last_used_at_unix_s = NULL",
+            [],
+        )?;
+        tx.commit()?;
         Ok(removed)
     }
 
@@ -2427,6 +2440,28 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM usage_events", [], |row| row.get(0))
             .expect("count usage events");
         assert_eq!(usage_count, 1);
+    }
+
+    #[test]
+    fn clearing_usage_events_resets_the_counters_the_ranker_reads() {
+        let mut store = SqliteStore::open_in_memory().expect("open sqlite in memory");
+        store
+            .upsert_candidates(&[candidate("file:seen", "seen.txt", "/tmp/seen.txt")])
+            .expect("insert candidate");
+        store
+            .record_usage_event("file:seen", "open_file")
+            .expect("record usage");
+        assert_eq!(
+            store.load_candidates(None).expect("load after usage")[0].use_count,
+            1
+        );
+
+        let removed = store.clear_usage_events().expect("clear usage");
+
+        assert_eq!(removed, 1);
+        let rows = store.load_candidates(None).expect("load after clear");
+        assert_eq!(rows[0].use_count, 0, "the ranker must forget the launch");
+        assert!(rows[0].last_used_at_unix_s.is_none());
     }
 
     #[test]

@@ -15,8 +15,13 @@ use zeidex_engine::config::RuntimeConfig;
 /// The public project facts. Constants, not settings: a user cannot edit the
 /// publisher of the build they are running.
 const DEVELOPER: &str = "Zeidexsoft";
+/// The person behind the project. A user who needs to reach a human should not
+/// have to infer a handle from a repository URL.
+const MAINTAINER: &str = "@zeiad6";
 const WEBSITE: &str = "https://zeidexsoft.com";
 const REPOSITORY: &str = "https://github.com/zeiad6/zeidex-search";
+/// The project's own developer card, linked from the README.
+const DEVELOPER_CARD: &str = "https://zeidexlink.zeidexsoft.com/zeidex";
 const LICENSE: &str = "GPL-3.0-or-later";
 const COPYRIGHT: &str = "Copyright © 2026 Zeidexsoft";
 
@@ -30,8 +35,10 @@ pub struct AppFacts {
     pub build: &'static str,
     pub tauri: &'static str,
     pub developer: &'static str,
+    pub maintainer: &'static str,
     pub website: &'static str,
     pub repository: &'static str,
+    pub developer_card: &'static str,
     pub license: &'static str,
     pub copyright: &'static str,
 }
@@ -114,8 +121,10 @@ pub fn diagnostics_snapshot(state: State<'_, AppState>) -> DiagnosticsSnapshot {
             },
             tauri: tauri::VERSION,
             developer: DEVELOPER,
+            maintainer: MAINTAINER,
             website: WEBSITE,
             repository: REPOSITORY,
+            developer_card: DEVELOPER_CARD,
             license: LICENSE,
             copyright: COPYRIGHT,
         },
