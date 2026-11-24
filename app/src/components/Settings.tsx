@@ -217,10 +217,20 @@ export default function Settings({
   const t = (en: string, ar: string) => (rtl ? ar : en);
 
   const [section, setSection] = useState<Section>("general");
+  // The nav is eleven rows; a filter is faster than scanning it. Matching is on
+  // both labels, so typing "excl" or "استثناء" reaches the same section.
+  const [sectionQuery, setSectionQuery] = useState("");
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const visibleSections = sectionQuery.trim()
+    ? SECTIONS.filter((entry) =>
+        `${entry.label} ${entry.labelAr}`
+          .toLowerCase()
+          .includes(sectionQuery.trim().toLowerCase()),
+      )
+    : SECTIONS;
   const [indexing, setIndexing] = useState(false);
   // The button's own request and the worker's status are both "busy"; the
   // pause controls belong to the worker's walk, not to this component's flag.
@@ -2002,27 +2012,50 @@ export default function Settings({
         )}
 
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-px bg-white/[0.06] sm:grid-cols-[13rem_1fr]">
-          <nav
-            aria-label={t("Settings sections", "أقسام الإعدادات")}
-            className="flex flex-row gap-1 overflow-x-auto bg-ink-950/60 p-3 sm:flex-col sm:overflow-visible"
-          >
-            {SECTIONS.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                onClick={() => setSection(entry.id)}
-                aria-current={section === entry.id ? "page" : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-start text-[0.78rem] transition ${
-                  section === entry.id
-                    ? "bg-white/[0.06] text-white"
-                    : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200"
-                }`}
-              >
-                <Icon name={entry.icon} size={13} />
-                {rtl ? entry.labelAr : entry.label}
-              </button>
-            ))}
-          </nav>
+          <div className="flex min-w-0 flex-col gap-2 bg-ink-950/60 p-3">
+            <label className="relative block">
+              <span className="sr-only">{t("Search settings", "ابحث في الإعدادات")}</span>
+              <span className="pointer-events-none absolute inset-y-0 start-2.5 grid place-items-center text-zinc-600">
+                <Icon name="search" size={12} />
+              </span>
+              <input
+                type="search"
+                value={sectionQuery}
+                onChange={(event) => setSectionQuery(event.target.value)}
+                placeholder={t("Search settings", "ابحث في الإعدادات")}
+                className="h-8 w-full rounded-lg border border-white/10 bg-surface-2 ps-8 pe-2 text-[0.74rem] text-zinc-200 placeholder:text-zinc-600 focus:border-accent-400/40 focus:outline-none"
+              />
+            </label>
+            <nav
+              aria-label={t("Settings sections", "أقسام الإعدادات")}
+              className="flex flex-row gap-1 overflow-x-auto sm:flex-col sm:overflow-visible"
+            >
+              {visibleSections.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => {
+                    setSection(entry.id);
+                    setSectionQuery("");
+                  }}
+                  aria-current={section === entry.id ? "page" : undefined}
+                  className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-start text-[0.78rem] transition ${
+                    section === entry.id
+                      ? "bg-white/[0.06] text-white"
+                      : "text-zinc-400 hover:bg-white/[0.03] hover:text-zinc-200"
+                  }`}
+                >
+                  <Icon name={entry.icon} size={13} />
+                  {rtl ? entry.labelAr : entry.label}
+                </button>
+              ))}
+              {visibleSections.length === 0 && (
+                <p className="px-1 py-2 text-[0.72rem] text-zinc-600">
+                  {t("No section matches.", "لا يوجد قسم مطابق.")}
+                </p>
+              )}
+            </nav>
+          </div>
 
           <div className="min-h-0 overflow-y-auto bg-ink-950/40 p-5">
             {loading ? (

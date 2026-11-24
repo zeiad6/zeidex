@@ -106,6 +106,9 @@ The settings screens were mostly promises. This pass makes them real:
   libraries and index size from the running process, and **Check for updates**
   asks the public GitHub releases API, showing a dismissible toast when a newer
   tag exists. Nothing about the user or the index is sent.
+- **Settings is eleven sections, not one long page**, with a filter box that
+  matches English and Arabic labels, grouped cards, inline validation and a
+  confirmation before anything destructive.
 
 ### Verified in this release
 
