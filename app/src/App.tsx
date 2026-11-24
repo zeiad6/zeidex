@@ -76,7 +76,7 @@ export default function App() {
   // only a placeholder until `hotkey_status` answers.
   const [welcome, setWelcome] = useState(false);
   const [hotkey, setHotkey] = useState("Alt+Space");
-  const [version, setVersion] = useState("0.4.0");
+  const [version, setVersion] = useState("0.5.0");
 
   const setDirection = useCallback((next: boolean) => {
     setRtl(next);

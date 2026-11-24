@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/zeiad6/zeidex-search/main/assets/brand/zeidex-hero-static.png" alt="Zeidex Search" width="780">
 </p>
 
-<h1 align="center">Zeidex Search 0.4.0</h1>
+<h1 align="center">Zeidex Search 0.5.0 — UI Polish, Theming, Autostart &amp; Index Exclusions</h1>
 
 <p align="center">
   <b>Your files. Your machine. Your data.</b><br>
@@ -17,6 +17,105 @@
   <img alt="OCR tiers" src="https://img.shields.io/badge/models-3%20tiers-2d3748?style=flat-square">
   <img alt="Licence" src="https://img.shields.io/badge/licence-GPL--3.0--or--later-2d3748?style=flat-square">
 </p>
+
+---
+
+## What's new in 0.5.0
+
+0.5.0 is the pass that makes the shell as finished as the engine. One theme
+system replaces the per-screen colours, every settings switch writes something
+real, exclusions are enforced in the walker instead of filtered after the fact,
+and the index can say how healthy it is.
+
+### The shell catches up with the engine
+
+The settings screens were mostly promises. This pass makes them real:
+
+- **One theme system, everywhere.** A single provider owns light, dark and
+  system; the same sun/moon toggle sits in the launcher, the Studio, batch
+  search, models and Settings. The light theme is warm paper (`#f3f4f6` page,
+  `#fafaf9` surface, white only for cards), not full-screen white; the dark
+  theme has four elevation steps instead of one flat black. The choice is
+  stored, applied before first paint, and the 260 ms cross-fade is skipped under
+  `prefers-reduced-motion`.
+- **Index Exclusions, enforced in the walker.** Folder, file, extension and safe
+  glob rules are persisted one per config line and compiled once per walk. An
+  excluded directory is pruned before its children are stat-ed, so no metadata,
+  OCR or database row is produced for it. Adding a rule deletes the rows it
+  rejects. Removing a folder or file rule re-walks only the path it covered;
+  removing an extension or pattern rule schedules a full pass, because its
+  matches can be anywhere. The development and
+  temporary presets are opt-in, and the default skip list no longer hides
+  `node_modules`, `target` or `build`.
+- **Start with Windows, now able to stay in the tray.** The switch, present
+  since 0.3.0, still reads the real `HKCU\...\Run` value back after every write.
+  New in this pass: a login launch passes `--autostart`, and with **Start
+  Minimized** it stays in the tray, reachable from the menu (Show Window, Open
+  Search, OCR Studio, Settings, Exit) or the global shortcut. A first run always
+  opens the window.
+- **A guide the first time.** The welcome sheet names the registered shortcut
+  (not the default), the keys that move through results, the context menu and
+  the tray. It is a modal - focus moves in, Tab is trapped, Escape is consumed -
+  and it is written once, then reopenable from Settings > General.
+- **About & Diagnostics** reads the build, publisher, maintainer, paths, model
+  libraries and index size from the running process, and **Check for updates**
+  asks the public GitHub releases API, showing a dismissible toast when a newer
+  tag exists. Nothing about the user or the index is sent.
+- **Settings is eleven sections, not one long page**, with a filter box that
+  matches English and Arabic labels, grouped cards, inline validation and a
+  confirmation before anything destructive.
+- **The index says how it is.** Settings > Indexing derives a health label
+  (healthy, updating, needs refresh, partial, error) from the worker's own
+  status, and reports how many entries your exclusion rules pruned in the last
+  walk. That count comes from the walker, not an estimate: a pruned folder
+  counts once because its children are never read.
+
+### One icon set, one depth scale
+
+- **Every glyph is a 24 px stroke path.** The launcher, Settings, the Studio and
+  the dialogs draw from one dependency-free set that inherits `currentColor`, so
+  an icon cannot arrive with a different stroke width or a second accent colour.
+  File kinds differ by shape — page, table, image, text, archive, code,
+  executable — not by a rainbow of badges.
+- **Four elevation steps, four shadows.** `sunken`, `surface`, `surface-2` and
+  `float` are tokens re-pointed per theme; cards take the card shadow, menus and
+  dialogs the pop shadow. The light theme uses a warm grey shadow, not black at
+  20 %.
+- **The name leads the card.** The file name is the first and largest element;
+  the format and match type are small badges, and modified date, size and drive
+  share one quiet line. Hover, keyboard selection and focus share the same
+  surface, and the context menu offers Open, Open location and Copy path.
+- **Motion is finite.** Hover and focus transitions, the theme cross-fade and
+  the index status change run only while something changes. Nothing animates at
+  idle, and `prefers-reduced-motion` turns the transitions off.
+
+### Privacy is a screen, not a promise
+
+Settings > Privacy states what is indexed, which drives are in scope, which
+rules exclude files, where the database lives, and how to delete the index,
+stop indexing and clear search history. Search and indexing stay local; the only
+outbound request is the update check you press, and it sends no file name, path
+or index content.
+
+### Verified in this release
+
+| Gate | Result |
+| --- | --- |
+| Version | 0.5.0 in the workspace, the shell, `tauri.conf.json`, `package.json` and the lockfile |
+| Core tests | 632 passed, 0 failed |
+| Shell tests | 92 passed, 0 failed |
+| Frontend tests | 114 passed, 0 failed |
+| TypeScript + Vite build | clean |
+| Clippy + rustfmt (core, shell) | clean, 0 warnings |
+| Accessibility (axe-core 4.10.2) | 0 violations across 16 screens: launcher, welcome, General, Indexing, Exclusions, Startup, Privacy and About; light, dark and RTL |
+| Result menu | right-click and Shift+F10 open Open, Open location and Copy path; axe 0 violations with the menu open |
+| Package | `make deb` produced `Zeidex Search_0.5.0_arm64.deb`; metadata and extracted binary inspected |
+
+The Windows runtime, the MSI/NSIS installers, the Windows autostart entry and
+GPU acceleration were **not** exercised in the arm64 Linux environment that
+produced this package. They are listed in `ENGINEERING_REPORT_0.5.0.md` § J
+with the reason, not described as done. The Arabic OCR corpus was not re-run in
+this pass because the recognizer did not change; its 0.4.0 result stands.
 
 ---
 
@@ -75,63 +174,17 @@ Arabic, and a PDF that breaks Arabic is worse than no button.
   counters the ranker reads, so the action changed nothing observable until a
   reindex. Both are now cleared in one transaction and the engine is reloaded.
 
-### The shell catches up with the engine
-
-The settings screens were mostly promises. This pass makes them real:
-
-- **One theme system, everywhere.** A single provider owns light, dark and
-  system; the same sun/moon toggle sits in the launcher, the Studio, batch
-  search, models and Settings. The light theme is warm paper (`#f3f4f6` page,
-  `#fafaf9` surface, white only for cards), not full-screen white; the dark
-  theme has four elevation steps instead of one flat black. The choice is
-  stored, applied before first paint, and the 260 ms cross-fade is skipped under
-  `prefers-reduced-motion`.
-- **Index Exclusions, enforced in the walker.** Folder, file, extension and safe
-  glob rules are persisted one per config line and compiled once per walk. An
-  excluded directory is pruned before its children are stat-ed, so no metadata,
-  OCR or database row is produced for it. Adding a rule deletes the rows it
-  rejects; removing one re-walks only the scope it covered. The development and
-  temporary presets are opt-in, and the default skip list no longer hides
-  `node_modules`, `target` or `build`.
-- **Start with Windows, optionally in the tray.** The switch reads the real
-  `HKCU\...\Run` value back after every write. A login launch passes
-  `--autostart`; with **Start Minimized** it stays in the tray, reachable from
-  the menu (Show Window, Open Search, OCR Studio, Settings, Exit) or the global
-  shortcut. A first run always opens the window.
-- **A guide the first time.** The welcome sheet names the registered shortcut
-  (not the default), the keys that move through results, the context menu and
-  the tray. It is a modal - focus moves in, Tab is trapped, Escape is consumed -
-  and it is written once, then reopenable from Settings > General.
-- **About & Diagnostics** reads the build, publisher, maintainer, paths, model
-  libraries and index size from the running process, and **Check for updates**
-  asks the public GitHub releases API, showing a dismissible toast when a newer
-  tag exists. Nothing about the user or the index is sent.
-- **Settings is eleven sections, not one long page**, with a filter box that
-  matches English and Arabic labels, grouped cards, inline validation and a
-  confirmation before anything destructive.
-- **The index says how it is.** Settings > Indexing derives a health label
-  (healthy, updating, needs refresh, partial, error) from the worker's own
-  status, and reports how many entries your exclusion rules pruned in the last
-  walk. That count comes from the walker, not an estimate: a pruned folder
-  counts once because its children are never read.
-
 ### Verified in this release
 
 | Gate | Result |
 | --- | --- |
-| Core tests | 632 passed, 0 failed |
-| Shell tests | 92 passed, 0 failed |
-| Frontend tests | 109 passed, 0 failed |
-| TypeScript + Vite build | clean |
-| Clippy + rustfmt (core, shell) | clean, 0 warnings |
+| Core tests | 620 passed |
+| Shell tests | 81 passed |
+| Frontend tests | 102 passed |
+| Clippy + rustfmt | clean, 0 warnings |
 | Arabic OCR corpus | CER 0.60 %, WER 3.45 % |
-| Accessibility (axe-core 4.10.2) | 0 violations across 16 screens: launcher, welcome, General, Indexing, Exclusions, Startup, Privacy and About; light, dark and RTL |
-| Package | `make deb` produced `Zeidex Search_0.4.0_arm64.deb` (52.85 MiB); metadata and extracted binary inspected |
-
-The Windows runtime, the MSI/NSIS installers, the Windows autostart entry and
-GPU acceleration were **not** exercised in the arm64 Linux environment that
-produced this package. They are listed in `ENGINEERING_REPORT_0.4.0.md` § J
-with the reason, not described as done.
+| Accessibility (axe-core 4.10.2) | 0 violations, panel open, dark/RTL/light |
+| Release binary | launches, indexes 5079 candidates, full schema |
 
 The Arabic recognizer was also put to a direct A/B: the bundled PP-OCRv4 model
 scored CER 0.60 % / WER 3.45 % on the labelled corpus, the PP-OCRv5 candidate
@@ -524,18 +577,19 @@ working until the new one verifies.
 
 | Platform | Package | Best for |
 | --- | --- | --- |
-| **Windows 10/11 (x64)** | `Zeidex Search_0.4.0_x64_en-US.msi` | Standard installer, per-machine or per-user, WiX-based. |
-| **Windows 10/11 (x64)** | `Zeidex Search_0.4.0_x64-setup.exe` | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
-| **Linux (x86_64)** | `Zeidex Search_0.4.0_amd64.deb` | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
-| **Linux (x86_64)** | `Zeidex Search_0.4.0_amd64.AppImage` | Any distribution; no installation, no root. |
-| **Linux (arm64)** | `Zeidex Search_0.4.0_arm64.deb` | Raspberry Pi 4/5 and ARM laptops on Debian 12+ or Ubuntu 22.04+. |
+| **Windows 10/11 (x64)** | `Zeidex Search_0.5.0_x64_en-US.msi` | Standard installer, per-machine or per-user, WiX-based. |
+| **Windows 10/11 (x64)** | `Zeidex Search_0.5.0_x64-setup.exe` | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
+| **Linux (x86_64)** | `Zeidex Search_0.5.0_amd64.deb` | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
+| **Linux (x86_64)** | `Zeidex Search_0.5.0_amd64.AppImage` | Any distribution; no installation, no root. |
+| **Linux (arm64)** | `Zeidex Search_0.5.0_arm64.deb` | Raspberry Pi 4/5 and ARM laptops on Debian 12+ or Ubuntu 22.04+. |
 
-> These packages were built by the `Release` workflow on GitHub runners from
-> this commit; their sizes and SHA-256 hashes are recorded in
-> `ENGINEERING_REPORT_0.4.0.md` § I1 and in the `SHA256SUMS` asset. The Windows
-> packages were **not** installed or run in the Linux environment that produced
-> this commit (see § J). Remove a previously installed *Zeidex Studio* before
-> installing this release — see [Known limitations](#known-limitations).
+> The arm64 Debian package was built and inspected in this tree. The Windows and
+> amd64 packages are produced by the `Release` workflow when the `v0.5.0` tag is
+> cut; their hashes will be in the `SHA256SUMS` asset. The Windows packages were
+> **not** installed or run in the Linux environment that produced this commit
+> (see `ENGINEERING_REPORT_0.5.0.md` § J). Remove a previously installed
+> *Zeidex Studio* before installing this release — see
+> [Known limitations](#known-limitations).
 
 > The x64 packages are produced on GitHub's native runners from the release
 > commit, so every artifact matches the source behind this release. The arm64
@@ -547,32 +601,32 @@ working until the new one verifies.
 **Windows — MSI**
 
 ```powershell
-msiexec /i "Zeidex Search_0.4.0_x64_en-US.msi"
+msiexec /i "Zeidex Search_0.5.0_x64_en-US.msi"
 ```
 
 **Windows — NSIS**
 
 ```powershell
-"Zeidex Search_0.4.0_x64-setup.exe"
+"Zeidex Search_0.5.0_x64-setup.exe"
 ```
 
 **Debian / Ubuntu (x86_64)**
 
 ```bash
-sudo apt install "./Zeidex Search_0.4.0_amd64.deb"
+sudo apt install "./Zeidex Search_0.5.0_amd64.deb"
 ```
 
 **Debian / Ubuntu (arm64)**
 
 ```bash
-sudo apt install "./Zeidex Search_0.4.0_arm64.deb"
+sudo apt install "./Zeidex Search_0.5.0_arm64.deb"
 ```
 
 **AppImage**
 
 ```bash
-chmod +x "Zeidex Search_0.4.0_amd64.AppImage"
-./"Zeidex Search_0.4.0_amd64.AppImage"
+chmod +x "Zeidex Search_0.5.0_amd64.AppImage"
+./"Zeidex Search_0.5.0_amd64.AppImage"
 ```
 
 The Linux packages depend on `libwebkit2gtk-4.1-0`, `libgtk-3-0` and
@@ -608,21 +662,21 @@ arm64 package was built from the same commit on aarch64 Linux and inspected with
 `dpkg-deb`. Verify a download before installing:
 
 ```bash
-sha256sum "Zeidex Search_0.4.0_arm64.deb"
+sha256sum "Zeidex Search_0.5.0_arm64.deb"
 # 33674452e76d642b7c0af1c5ee51a40d77bfeefecfe4d9c0e10ed9191b0ae4e1
 ```
 
 ```powershell
-Get-FileHash "Zeidex Search_0.4.0_x64_en-US.msi" -Algorithm SHA256
+Get-FileHash "Zeidex Search_0.5.0_x64_en-US.msi" -Algorithm SHA256
 # 67713344233d4da6290e93c1a2ce9c93664e5f857b6b7bdf743573ea2a21cbda
-Get-FileHash "Zeidex Search_0.4.0_x64-setup.exe" -Algorithm SHA256
+Get-FileHash "Zeidex Search_0.5.0_x64-setup.exe" -Algorithm SHA256
 # b0f811764d1236f70a5174db03796eed256c7e1739e9645cc108641b432b5b89
 ```
 
 ```bash
-sha256sum "Zeidex Search_0.4.0_amd64.deb"
+sha256sum "Zeidex Search_0.5.0_amd64.deb"
 # ef0eaae53683187820b5c00c73879e80a87babcec46a6da7737a6a4643490049
-sha256sum "Zeidex Search_0.4.0_amd64.AppImage"
+sha256sum "Zeidex Search_0.5.0_amd64.AppImage"
 # 6cba11c6bb850133bb1eac891ea0dec23d5c884421c56a0bb9dde047f7fa98b8
 ```
 

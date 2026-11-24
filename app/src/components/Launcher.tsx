@@ -7,6 +7,7 @@ import { Wordmark } from "./Brand";
 import ClipboardPanel from "./ClipboardPanel";
 import { Icon } from "./Icons";
 import ResultList from "./ResultList";
+import { menuPosition } from "../menu-position";
 import ThemeToggle from "./ThemeToggle";
 import WindowControls from "./WindowControls";
 import TranslationPanel from "./TranslationPanel";
@@ -102,6 +103,10 @@ export default function Launcher({
   const [selected, setSelected] = useState(0);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // The result context menu: which row, and where the pointer opened it. The
+  // row index is into `visible`, the same list the keyboard moves through.
+  const [menu, setMenu] = useState<{ index: number; x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [clipboard, setClipboard] = useState<ClipEntry[]>([]);
   const [clipboardPaused, setClipboardPaused] = useState(false);
   const [indexing, setIndexing] = useState(false);
@@ -151,6 +156,13 @@ export default function Launcher({
     inputRef.current?.focus();
     setSelected(0);
   }, [tab]);
+
+  // The menu remembers a row index, and a new query replaces the list under it.
+  // Closing on any change is cheaper and safer than tracking the same result
+  // through a re-sort.
+  useEffect(() => {
+    setMenu(null);
+  }, [query, tab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -260,9 +272,7 @@ export default function Launcher({
     return true;
   });
 
-  const runSelected = async () => {
-    const result = visible[selected];
-    if (!result) return;
+  const runResult = async (result: LaunchResult) => {
     try {
       // A web row is composed by the shell and has no candidate row, so there
       // is nothing for `usage_events` to point at (the foreign key would fail
@@ -288,6 +298,43 @@ export default function Launcher({
           setNotice("This action is not available in this build.");
           return;
       }
+      await getCurrentWindow().hide();
+    } catch (err) {
+      setNotice(String(err));
+    }
+  };
+
+  const runSelected = async () => {
+    const result = visible[selected];
+    if (!result) return;
+    await runResult(result);
+  };
+
+  // Opening a row through the menu must run that row, not whichever row the
+  // keyboard happened to select before the pointer arrived.
+  const openMenu = (index: number, x: number, y: number) => {
+    if (!visible[index]) return;
+    setSelected(index);
+    setMenu({ index, x, y });
+  };
+
+  const closeMenu = () => {
+    setMenu(null);
+    inputRef.current?.focus();
+  };
+
+  const copyPath = async (path: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setNotice(rtl ? "نُسخ المسار" : "Path copied");
+    } catch {
+      setNotice(rtl ? "تعذّر النسخ" : "Copy failed");
+    }
+  };
+
+  const revealPath = async (path: string) => {
+    try {
+      await api.revealTarget(path);
       await getCurrentWindow().hide();
     } catch (err) {
       setNotice(String(err));
@@ -322,6 +369,13 @@ export default function Launcher({
     }
   };
 
+  // A menu opened from the keyboard starts on its first item; a menu opened by
+  // right-click does too, so Escape and the arrow keys work without a click.
+  useEffect(() => {
+    if (!menu) return;
+    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [menu]);
+
   // Enter on the calculator row copies the bare, re-parseable value (`raw`),
   // not the grouped display (`1,000,000`), so pasting it elsewhere still works.
   const copyCalc = async (value: Calculation) => {
@@ -350,6 +404,11 @@ export default function Launcher({
       }
     } else if (event.key === "Escape") {
       void getCurrentWindow().hide();
+    } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      const row = document.getElementById(`zeidex-option-${selected}`);
+      const rect = row?.getBoundingClientRect();
+      openMenu(selected, rect ? rect.left + 24 : 24, rect ? rect.bottom : 96);
     } else if (event.key === "Tab") {
       event.preventDefault();
       setTab((current) => {
@@ -374,6 +433,10 @@ export default function Launcher({
   };
 
   const idle = query.trim().length === 0;
+  const menuResult = menu ? visible[menu.index] : undefined;
+  const menuAt = menu
+    ? menuPosition(menu.x, menu.y, 208, 124, window.innerWidth, window.innerHeight)
+    : null;
   // The button's own request and the worker's status are both "busy"; showing
   // only the local flag would let a startup walk look idle.
   const busy = indexing || (indexStatus?.indexing ?? false);
@@ -610,8 +673,9 @@ export default function Launcher({
               onRun={(result) => {
                 const index = visible.indexOf(result);
                 if (index >= 0) setSelected(index);
-                void runSelected();
+                void runResult(result);
               }}
+              onMenu={openMenu}
               actionLabel={rtl ? ACTION_LABEL_AR : ACTION_LABEL}
               rtl={rtl}
             />
@@ -688,6 +752,80 @@ export default function Launcher({
           </span>
         </footer>
       </div>
+
+      {menu && menuResult && menuAt && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            aria-hidden="true"
+            onPointerDown={closeMenu}
+          />
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={rtl ? "إجراءات النتيجة" : "Result actions"}
+            style={{ left: menuAt.left, top: menuAt.top }}
+            className="fixed z-50 w-52 overflow-hidden rounded-xl border border-white/10 bg-float p-1 shadow-[var(--shadow-pop)]"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                closeMenu();
+                return;
+              }
+              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+              event.preventDefault();
+              const items = Array.from(
+                menuRef.current?.querySelectorAll<HTMLButtonElement>("button[role=menuitem]") ?? [],
+              );
+              if (items.length === 0) return;
+              const current = items.indexOf(document.activeElement as HTMLButtonElement);
+              const step = event.key === "ArrowDown" ? 1 : -1;
+              items[(current + step + items.length) % items.length]?.focus();
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeMenu();
+                void runResult(menuResult);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[0.78rem] text-zinc-200 transition hover:bg-white/[0.07] focus:bg-white/[0.07] focus:outline-none"
+            >
+              <Icon name="enter" size={13} className="shrink-0 text-zinc-500" />
+              {rtl ? "فتح" : "Open"}
+            </button>
+            {menuResult.path && (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeMenu();
+                    void revealPath(menuResult.path);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[0.78rem] text-zinc-200 transition hover:bg-white/[0.07] focus:bg-white/[0.07] focus:outline-none"
+                >
+                  <Icon name="folder" size={13} className="shrink-0 text-zinc-500" />
+                  {rtl ? "فتح الموقع" : "Open location"}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeMenu();
+                    void copyPath(menuResult.path);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[0.78rem] text-zinc-200 transition hover:bg-white/[0.07] focus:bg-white/[0.07] focus:outline-none"
+                >
+                  <Icon name="clipboard" size={13} className="shrink-0 text-zinc-500" />
+                  {rtl ? "نسخ المسار" : "Copy path"}
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

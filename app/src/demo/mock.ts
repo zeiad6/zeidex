@@ -36,7 +36,7 @@ export function installMock() {
   let demoPacks = MODEL_PACKS.map((pack) => ({ ...pack, files: pack.files.map((file) => ({ ...file })) }));
   let demoActive = "ppocrv4-mobile";
   let demoSettings = {
-    version: "0.4.0",
+    version: "0.5.0",
     platform: "windows",
     configPath: "C:\\Users\\you\\AppData\\Roaming\\zeidex\\config.json",
     dbPath: "C:\\Users\\you\\AppData\\Roaming\\zeidex\\zeidex.db",
@@ -536,7 +536,7 @@ export function installMock() {
         return {
           app: {
             name: "Zeidex Search",
-            version: "0.4.0",
+            version: "0.5.0",
             build: "release",
             tauri: "2.12",
             developer: "Zeidexsoft",
@@ -578,10 +578,10 @@ export function installMock() {
         return true;
       case "check_for_updates":
         return {
-          current: "0.4.0",
-          latest: "0.4.0",
+          current: "0.5.0",
+          latest: "0.5.0",
           available: false,
-          url: "https://github.com/zeiad6/zeidex-search/releases/tag/v0.4.0",
+          url: "https://github.com/zeiad6/zeidex-search/releases/tag/v0.5.0",
           notes: "",
           publishedAt: "2026-11-20T10:00:00Z",
           checkedAt: Math.floor(Date.now() / 1000),
@@ -673,10 +673,10 @@ export function installMock() {
         ) {
           window.setTimeout(() => {
             emit("zeidex://update", {
-              current: "0.4.0",
-              latest: "0.4.1",
+              current: "0.5.0",
+              latest: "0.5.1",
               available: true,
-              url: "https://github.com/zeiad6/zeidex-search/releases/tag/v0.4.1",
+              url: "https://github.com/zeiad6/zeidex-search/releases/tag/v0.5.1",
               notes: "A calmer light theme and a fix for drives that report no free space.",
               publishedAt: "2026-11-22T09:00:00Z",
               checkedAt: Math.floor(Date.now() / 1000),

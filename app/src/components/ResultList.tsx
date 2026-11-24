@@ -107,6 +107,7 @@ export default function ResultList({
   selected,
   onHover,
   onRun,
+  onMenu,
   actionLabel,
   rtl,
 }: {
@@ -114,6 +115,7 @@ export default function ResultList({
   selected: number;
   onHover: (index: number) => void;
   onRun: (result: LaunchResult) => void;
+  onMenu: (index: number, x: number, y: number) => void;
   actionLabel?: Record<string, string>;
   rtl: boolean;
 }) {
@@ -171,6 +173,10 @@ export default function ResultList({
               tabIndex={-1}
               onMouseEnter={() => onHover(index)}
               onClick={() => onRun(result)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onMenu(index, event.clientX, event.clientY);
+              }}
               className={`group relative flex w-full cursor-default items-center gap-3 rounded-xl border px-3 py-2.5 text-start transition-[background-color,border-color,box-shadow] duration-150 ${
                 active
                   ? "border-white/10 bg-surface-3 shadow-[var(--shadow-card)]"

@@ -51,7 +51,8 @@ tauri-build:
 # naming schemes; see its header for the full reason.
 deb:
 	./app/node_modules/.bin/tauri build --bundles deb
-	@for deb in src-tauri/target/release/bundle/deb/*.deb; do \
+	@version=$$(python3 -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["version"])'); \
+	for deb in src-tauri/target/release/bundle/deb/*_$${version}_*.deb; do \
 		./scripts/fix-deb-depends.sh "$$deb"; \
 	done
 
