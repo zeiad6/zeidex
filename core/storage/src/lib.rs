@@ -495,7 +495,7 @@ impl SqliteStore {
         // column is two edits that can silently disagree. SQLite reads a
         // negative LIMIT as unbounded, which is exactly "no limit".
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, title, subtitle, path, use_count, last_used_at_unix_s, fs_modified_at_unix_s, icon
+            "SELECT id, kind, title, subtitle, path, use_count, last_used_at_unix_s, fs_modified_at_unix_s, icon, fs_size_bytes
              FROM candidates ORDER BY title ASC LIMIT ?1",
         )?;
         let mut rows = stmt.query([limit.map_or(-1, |max| max as i64)])?;
@@ -516,6 +516,9 @@ impl SqliteStore {
                 use_count: to_use_count(use_count_raw)?,
                 last_used_at_unix_s: row.get(6)?,
                 fs_modified_at_unix_s: row.get(7)?,
+                fs_size_bytes: row
+                    .get::<_, Option<i64>>(9)?
+                    .map(|value| value.max(0) as u64),
                 icon: row.get::<_, Option<String>>(8)?.map(String::into_boxed_str),
             });
         }
@@ -605,8 +608,8 @@ impl SqliteStore {
                 // List EVERY scan-owned column here; a missing one means stale data
                 // silently lingers. (use_count/last_used_at are intentionally never
                 // overwritten on conflict, so they're not part of change detection.)
-                "INSERT INTO candidates (id, kind, title, subtitle, path, use_count, last_used_at_unix_s, indexed_at_unix_s, fs_modified_at_unix_s, icon)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                "INSERT INTO candidates (id, kind, title, subtitle, path, use_count, last_used_at_unix_s, indexed_at_unix_s, fs_modified_at_unix_s, icon, fs_size_bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT(id) DO UPDATE SET
                    kind = excluded.kind,
                    title = excluded.title,
@@ -614,13 +617,15 @@ impl SqliteStore {
                      path = excluded.path,
                     indexed_at_unix_s = excluded.indexed_at_unix_s,
                     fs_modified_at_unix_s = excluded.fs_modified_at_unix_s,
-                    icon = excluded.icon
+                    icon = excluded.icon,
+                    fs_size_bytes = excluded.fs_size_bytes
                  WHERE candidates.kind <> excluded.kind
                     OR candidates.title <> excluded.title
                     OR candidates.subtitle IS NOT excluded.subtitle
                     OR candidates.path <> excluded.path
                     OR candidates.fs_modified_at_unix_s IS NOT excluded.fs_modified_at_unix_s
-                    OR candidates.icon IS NOT excluded.icon",
+                    OR candidates.icon IS NOT excluded.icon
+                    OR candidates.fs_size_bytes IS NOT excluded.fs_size_bytes",
             )?;
 
             for candidate in candidates {
@@ -636,6 +641,7 @@ impl SqliteStore {
                     indexed_at_unix_s,
                     candidate.fs_modified_at_unix_s,
                     candidate.icon.as_deref(),
+                    candidate.fs_size_bytes.map(|value| value as i64),
                 ])?;
             }
         }
@@ -650,8 +656,8 @@ impl SqliteStore {
 
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO candidates (id, kind, title, subtitle, path, use_count, last_used_at_unix_s, indexed_at_unix_s, fs_modified_at_unix_s, icon)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                "INSERT INTO candidates (id, kind, title, subtitle, path, use_count, last_used_at_unix_s, indexed_at_unix_s, fs_modified_at_unix_s, icon, fs_size_bytes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
 
             for candidate in candidates {
@@ -667,6 +673,7 @@ impl SqliteStore {
                     None::<i64>,
                     candidate.fs_modified_at_unix_s,
                     candidate.icon.as_deref(),
+                    candidate.fs_size_bytes.map(|value| value as i64),
                 ])?;
             }
         }
@@ -1293,6 +1300,16 @@ impl SqliteStore {
         Ok(stale_ids.len())
     }
 
+    /// Deletes every usage event, returning how many rows were removed.
+    ///
+    /// This is the Privacy screen's "clear search history": the candidate rows
+    /// stay, so search keeps working, but the record of what the user launched
+    /// and when is gone.
+    pub fn clear_usage_events(&mut self) -> StorageResult<usize> {
+        let removed = self.conn.execute("DELETE FROM usage_events", [])?;
+        Ok(removed)
+    }
+
     pub fn prune_usage_events_older_than(&mut self, cutoff_unix_s: i64) -> StorageResult<usize> {
         let removed = self.conn.execute(
             "DELETE FROM usage_events WHERE used_at_unix_s < ?1",
@@ -1345,7 +1362,10 @@ impl SqliteStore {
                  path TEXT NOT NULL,
                  use_count INTEGER NOT NULL DEFAULT 0,
                  last_used_at_unix_s INTEGER,
-                 indexed_at_unix_s INTEGER
+                 indexed_at_unix_s INTEGER,
+                 fs_modified_at_unix_s INTEGER,
+                 fs_size_bytes INTEGER,
+                 icon TEXT
               );
 
              CREATE INDEX IF NOT EXISTS idx_candidates_title ON candidates(title);
@@ -1411,6 +1431,10 @@ impl SqliteStore {
         // Filesystem mtime, captured at index time, powers the recent view's
         // "newly added/changed" signal. Additive column on existing DBs.
         ensure_column_exists(&self.conn, "candidates", "fs_modified_at_unix_s", "INTEGER")?;
+
+        // File size, captured at index time, so a result card can show it
+        // without a stat per row. Additive on existing DBs.
+        ensure_column_exists(&self.conn, "candidates", "fs_size_bytes", "INTEGER")?;
 
         // What a declared source row asked to be drawn as. Only source rows set
         // it, so it is NULL for almost every row. Additive on existing DBs.

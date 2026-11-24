@@ -1,25 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
-import { api } from "./api";
+import { api, type UpdateInfo } from "./api";
 import type { IndexStatus } from "./index-status";
 import BatchSearch from "./components/BatchSearch";
 import Launcher from "./components/Launcher";
 import Models from "./components/Models";
 import OcrStudio from "./components/OcrStudio";
 import Settings from "./components/Settings";
+import Welcome from "./components/Welcome";
 import ErrorBoundary from "./ErrorBoundary";
+import { Icon } from "./components/Icons";
 import { clampToScreen, logicalScreen } from "./window-size";
-import {
-  applyTheme,
-  resolveTheme,
-  saveTheme,
-  storedTheme,
-  systemPrefersLight,
-  type ThemeChoice,
-} from "./theme";
+import { useTheme } from "./theme-context";
 
 type Mode = "launcher" | "ocr" | "settings" | "batch" | "models";
+
+const MODES: Mode[] = ["launcher", "ocr", "settings", "batch", "models"];
 
 const DIRECTION_KEY = "zeidex.direction";
 
@@ -70,33 +67,16 @@ function storedDirection(): boolean {
 export default function App() {
   const [mode, setMode] = useState<Mode>("launcher");
   const [rtl, setRtl] = useState(storedDirection);
-  const [theme, setTheme] = useState<ThemeChoice>(storedTheme);
-  const [osPrefersLight, setOsPrefersLight] = useState(systemPrefersLight);
+  const { choice: theme, setChoice: setThemeChoice } = useTheme();
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
-
-  // `system` must keep following the OS while the window is open, so the media
-  // query is a subscription rather than a value read once at boot.
-  useEffect(() => {
-    let query: MediaQueryList;
-    try {
-      query = window.matchMedia("(prefers-color-scheme: light)");
-    } catch {
-      return;
-    }
-    const onChange = () => setOsPrefersLight(query.matches);
-    setOsPrefersLight(query.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-
-  useEffect(() => {
-    applyTheme(resolveTheme(theme, osPrefersLight));
-  }, [theme, osPrefersLight]);
-
-  const setThemeChoice = useCallback((next: ThemeChoice) => {
-    setTheme(next);
-    saveTheme(next);
-  }, []);
+  // A newer release, announced once. Dismissing hides the toast for this
+  // session; the About screen still shows the answer from the last check.
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  // The first-run guide, and the accelerator it should name. The default is
+  // only a placeholder until `hotkey_status` answers.
+  const [welcome, setWelcome] = useState(false);
+  const [hotkey, setHotkey] = useState("Alt+Space");
+  const [version, setVersion] = useState("0.4.0");
 
   const setDirection = useCallback((next: boolean) => {
     setRtl(next);
@@ -112,7 +92,10 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     api
       .onMode((next) => {
-        if (active) setMode(next === "ocr" ? "ocr" : "launcher");
+        if (!active) return;
+        // The tray can ask for any screen by name. An unknown value must not
+        // silently open the launcher on top of what the user was doing.
+        if ((MODES as string[]).includes(next)) setMode(next as Mode);
       })
       .then((fn) => {
         if (active) unlisten = fn;
@@ -133,6 +116,61 @@ export default function App() {
     api
       .onIndexStatus((status) => {
         if (active) setIndexStatus(status);
+      })
+      .then((fn) => {
+        if (active) unlisten = fn;
+        else fn();
+      });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
+  // Read the guide's state once. The shell already opened the window when the
+  // guide is unseen, so this only decides whether to draw it.
+  useEffect(() => {
+    let active = true;
+    api
+      .onboardingStatus()
+      .then((seen) => {
+        if (active && !seen) setWelcome(true);
+      })
+      .catch(() => {
+        // An unreadable config must not block the launcher.
+      });
+    api
+      .hotkeyStatus()
+      .then((status) => {
+        if (active && status.accelerator) setHotkey(status.accelerator);
+      })
+      .catch(() => {});
+    api
+      .settingsSnapshot()
+      .then((snapshot) => {
+        if (active && snapshot.version) setVersion(snapshot.version);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const dismissWelcome = useCallback(() => {
+    setWelcome(false);
+    // Best effort: if the write fails the guide returns next launch, which is
+    // better than pretending it was remembered.
+    void api.onboardingComplete().catch(() => {});
+  }, []);
+
+  // The background check only emits when a newer release exists, so any event
+  // is worth showing. It carries no user data: tag, date, notes, release URL.
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    api
+      .onUpdate((info) => {
+        if (active && info.available) setUpdate(info);
       })
       .then((fn) => {
         if (active) unlisten = fn;
@@ -204,6 +242,7 @@ export default function App() {
               theme={theme}
               onSetTheme={setThemeChoice}
               onBack={() => setMode("launcher")}
+              onShowWelcome={() => setWelcome(true)}
             />
           ) : (
             <Launcher
@@ -217,6 +256,59 @@ export default function App() {
             />
           )}
         </ErrorBoundary>
+
+        {welcome && (
+          <Welcome
+            rtl={rtl}
+            hotkey={hotkey}
+            version={version}
+            onDismiss={dismissWelcome}
+            onOpenSettings={() => {
+              dismissWelcome();
+              setMode("settings");
+            }}
+          />
+        )}
+
+        {update?.available && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="animate-rise fixed bottom-4 end-4 z-50 flex max-w-[22rem] items-start gap-3 rounded-xl border border-accent-400/25 bg-float/95 px-3.5 py-3 shadow-[var(--shadow-pop)] backdrop-blur"
+          >
+            <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent-400/15 text-accent-300">
+              <Icon name="update" size={14} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[0.78rem] font-medium text-zinc-100">
+                {rtl ? "يتوفر تحديث" : "Update available"}
+              </p>
+              <p className="mt-0.5 text-[0.7rem] leading-relaxed text-zinc-500">
+                {rtl
+                  ? `الإصدار ${update.latest} جاهز للتنزيل.`
+                  : `Zeidex ${update.latest} is ready to download.`}
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (update.url) void api.openUrl(update.url);
+                  }}
+                  className="rounded-full border border-accent-400/30 bg-accent-400/10 px-2.5 py-1 text-[0.68rem] font-medium text-accent-200 transition hover:bg-accent-400/20"
+                >
+                  {rtl ? "افتح صفحة الإصدار" : "Open release page"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUpdate(null)}
+                  className="rounded-full px-2 py-1 text-[0.68rem] text-zinc-500 transition hover:bg-white/10 hover:text-zinc-300"
+                >
+                  {rtl ? "لاحقاً" : "Later"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

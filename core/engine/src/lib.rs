@@ -1,6 +1,7 @@
 pub mod action;
 pub mod config;
 pub mod config_path;
+pub mod exclusions;
 pub mod index;
 pub mod modes;
 mod normalize;
@@ -13,6 +14,7 @@ pub mod url_history;
 
 pub use action::{ActionKind, LaunchAction};
 use config::RuntimeConfig;
+use exclusions::{Exclusion, ExclusionSet};
 use normalize::normalize_for_search;
 pub use platform::paths::path_is_same_or_child;
 use query::ParsedQuery;
@@ -392,6 +394,86 @@ impl QueryEngine {
     ) -> Result<RefreshOutcome, StorageError> {
         let mut store = SqliteStore::open(db_path)?;
         Self::refresh_paths_in(&mut store, config, removed, added)
+    }
+
+    /// Deletes every indexed row the current exclusion rules reject.
+    ///
+    /// Called after a rule is added or enabled. The walker will not produce
+    /// those rows again, but the rows already written would keep the excluded
+    /// files searchable until the next full walk - which is exactly the stale
+    /// result the feature exists to prevent. Returns the number of rows removed.
+    pub fn purge_excluded(
+        db_path: impl AsRef<Path>,
+        config: &RuntimeConfig,
+    ) -> Result<usize, StorageError> {
+        if config.exclusion_set.is_empty() {
+            return Ok(0);
+        }
+        let mut store = SqliteStore::open(db_path)?;
+        let ids: Vec<String> = store
+            .candidate_paths()?
+            .into_iter()
+            .filter(|(_, path)| {
+                let name = Path::new(path)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or(path.as_str());
+                // A directory's own row must not match an extension rule; the
+                // stat is one-time (a rule change), not per walk entry.
+                let is_dir = Path::new(path).is_dir();
+                config.exclusion_set.excludes(path, name, is_dir)
+            })
+            .map(|(id, _)| id)
+            .collect();
+        store.delete_candidates_by_ids(&ids)
+    }
+
+    /// Empties the candidate index, returning how many rows were removed.
+    ///
+    /// Used by the Privacy screen's explicit "delete index" action. Settings,
+    /// clipboard history and recognized text live in their own tables and are
+    /// untouched. The next walk (or "Reindex now") repopulates it; until then
+    /// search honestly returns nothing.
+    pub fn clear_index(db_path: impl AsRef<Path>) -> Result<usize, StorageError> {
+        let mut store = SqliteStore::open(db_path)?;
+        let removed = store.load_candidates(None)?.len();
+        store.replace_candidates(&[])?;
+        Ok(removed)
+    }
+
+    /// Deletes the launch history, returning how many events were removed.
+    ///
+    /// Usage events are what make a frequently opened file rank higher. The
+    /// Privacy screen offers to clear them without touching the index: the same
+    /// files stay findable, they just stop being ranked by past behaviour.
+    pub fn clear_usage_history(db_path: impl AsRef<Path>) -> Result<usize, StorageError> {
+        let mut store = SqliteStore::open(db_path)?;
+        store.clear_usage_events()
+    }
+
+    /// How many indexed rows one rule would reject. The Exclusions screen shows
+    /// this before the user commits, so "exclude this folder" has a number
+    /// instead of a promise. `None` when the database cannot be read.
+    pub fn count_matching(db_path: impl AsRef<Path>, rules: &[Exclusion]) -> Option<usize> {
+        let set = ExclusionSet::compile(rules);
+        if set.is_empty() {
+            return Some(0);
+        }
+        let store = SqliteStore::open(db_path).ok()?;
+        let paths = store.candidate_paths().ok()?;
+        Some(
+            paths
+                .into_iter()
+                .filter(|(_, path)| {
+                    let name = Path::new(path)
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or(path.as_str());
+                    let is_dir = Path::new(path).is_dir();
+                    set.excludes(path, name, is_dir)
+                })
+                .count(),
+        )
     }
 
     fn refresh_paths_in(

@@ -45,6 +45,7 @@ export function installMock() {
     fileScanLimit: 60000,
     fileScanExtraRoots: ["D:\\Projects"],
     lazyIndexingEnabled: true,
+    startMinimized: true,
     localizedAppNames: true,
     clipboardHistoryLimit: 200,
     clipboardFilterSecrets: true,
@@ -77,6 +78,99 @@ export function installMock() {
   };
   // The PDF run a Cancel click would stop, if one is in flight.
   let pdfRun: { cancelled: boolean } | null = null;
+  // Index Exclusions, as the Settings screen reads them. The demo keeps the
+  // same shape the commands return so the real component runs unchanged.
+  let demoExclusions = [
+    {
+      id: "ex-demo-1",
+      kind: "folder",
+      value: "D:\\Projects\\node_modules",
+      enabled: true,
+      added_at: 1763200000,
+    },
+    {
+      id: "ex-demo-2",
+      kind: "extension",
+      value: "tmp",
+      enabled: true,
+      added_at: 1763200100,
+    },
+    {
+      id: "ex-demo-3",
+      kind: "pattern",
+      value: "**/build/**",
+      enabled: false,
+      added_at: 1763200200,
+    },
+  ];
+  let demoDrives = [
+    {
+      root: "C:\\",
+      label: "System",
+      removable: false,
+      kind: "ssd",
+      totalBytes: 512_000_000_000,
+      freeBytes: 148_000_000_000,
+      scanRoot: false,
+    },
+    {
+      root: "D:\\",
+      label: "Projects",
+      removable: false,
+      kind: "ssd",
+      totalBytes: 1_000_000_000_000,
+      freeBytes: 410_000_000_000,
+      scanRoot: true,
+    },
+    {
+      root: "E:\\",
+      label: "Backup",
+      removable: true,
+      kind: "hdd",
+      totalBytes: 2_000_000_000_000,
+      freeBytes: 900_000_000_000,
+      scanRoot: false,
+    },
+  ];
+  const demoPresets = [
+    {
+      id: "development",
+      name: "Development files",
+      nameAr: "ملفات التطوير",
+      description: "Dependency and build folders that are never worth searching by name.",
+      descriptionAr: "مجلدات الاعتماديات والبناء التي لا تستحق البحث عنها بالاسم.",
+      rules: [
+        { kind: "folder", value: "node_modules" },
+        { kind: "folder", value: ".git" },
+        { kind: "folder", value: "target" },
+        { kind: "folder", value: "dist" },
+        { kind: "folder", value: "build" },
+      ],
+    },
+    {
+      id: "temporary",
+      name: "Temporary files",
+      nameAr: "الملفات المؤقتة",
+      description: "Caches, temp folders and logs.",
+      descriptionAr: "ذاكرات مؤقتة ومجلدات temp وسجلات.",
+      rules: [
+        { kind: "extension", value: "tmp" },
+        { kind: "extension", value: "log" },
+        { kind: "pattern", value: "**/Cache/**" },
+      ],
+    },
+    {
+      id: "system",
+      name: "System noise",
+      nameAr: "ضجيج النظام",
+      description: "Windows folders that add thousands of rows and no useful result.",
+      descriptionAr: "مجلدات Windows تضيف آلاف الصفوف دون نتيجة مفيدة.",
+      rules: [
+        { kind: "folder", value: "C:\\Windows\\WinSxS" },
+        { kind: "folder", value: "C:\\$Recycle.Bin" },
+      ],
+    },
+  ];
 
   const emit = (event: string, payload: unknown) => {
     const id = listeners.get(event);
@@ -333,6 +427,185 @@ export function installMock() {
       case "autostart_set":
         demoAutostart = { ...demoAutostart, enabled: Boolean(args.enabled) };
         return demoAutostart;
+      case "settings_pick_folder":
+      case "settings_pick_file":
+        // A browser has no native dialog. Returning `null` is the same answer
+        // the command gives when the user dismisses the picker.
+        return null;
+      case "exclusions_snapshot":
+        return {
+          entries: demoExclusions,
+          active: demoExclusions.filter((entry) => entry.enabled).length,
+          presets: demoPresets.map((preset) => ({
+            ...preset,
+            alreadyApplied: preset.rules.filter((rule) =>
+              demoExclusions.some(
+                (entry) =>
+                  entry.kind === rule.kind &&
+                  entry.value.toLowerCase() === rule.value.toLowerCase(),
+              ),
+            ).length,
+          })),
+          configPath: demoSettings.configPath,
+          indexPath: demoSettings.dbPath,
+        };
+      case "exclusions_add": {
+        const kind = String(args.kind ?? "folder");
+        const value = String(args.value ?? "").trim();
+        if (!value) throw "An exclusion needs a value.";
+        demoExclusions = [
+          ...demoExclusions,
+          {
+            id: `ex-demo-${demoExclusions.length + 1}-${Date.now()}`,
+            kind,
+            value,
+            enabled: true,
+            added_at: Math.floor(Date.now() / 1000),
+          },
+        ];
+        return {
+          entries: demoExclusions,
+          active: demoExclusions.filter((entry) => entry.enabled).length,
+          removed: 0,
+          reindexing: false,
+        };
+      }
+      case "exclusions_update": {
+        const id = String(args.id ?? "");
+        demoExclusions = demoExclusions.map((entry) =>
+          entry.id === id
+            ? {
+                ...entry,
+                value: args.value === undefined ? entry.value : String(args.value),
+                enabled: args.enabled === undefined ? entry.enabled : Boolean(args.enabled),
+              }
+            : entry,
+        );
+        return {
+          entries: demoExclusions,
+          active: demoExclusions.filter((entry) => entry.enabled).length,
+          removed: 0,
+          reindexing: false,
+        };
+      }
+      case "exclusions_remove": {
+        const id = String(args.id ?? "");
+        demoExclusions = demoExclusions.filter((entry) => entry.id !== id);
+        return {
+          entries: demoExclusions,
+          active: demoExclusions.filter((entry) => entry.enabled).length,
+          removed: 0,
+          reindexing: false,
+        };
+      }
+      case "exclusions_clear":
+        demoExclusions = [];
+        return { entries: [], active: 0, removed: 0, reindexing: false };
+      case "exclusions_apply_preset": {
+        const preset = demoPresets.find((entry) => entry.id === args.preset);
+        if (preset) {
+          for (const rule of preset.rules) {
+            const exists = demoExclusions.some(
+              (entry) =>
+                entry.kind === rule.kind &&
+                entry.value.toLowerCase() === rule.value.toLowerCase(),
+            );
+            if (!exists) {
+              demoExclusions.push({
+                id: `ex-demo-${demoExclusions.length + 1}-${Date.now()}`,
+                kind: rule.kind,
+                value: rule.value,
+                enabled: true,
+                added_at: Math.floor(Date.now() / 1000),
+              });
+            }
+          }
+        }
+        return {
+          entries: demoExclusions,
+          active: demoExclusions.filter((entry) => entry.enabled).length,
+          removed: 0,
+          reindexing: false,
+        };
+      }
+      case "exclusions_preview":
+        return 0;
+      case "system_drives":
+        return demoDrives;
+      case "diagnostics_snapshot":
+        return {
+          app: {
+            name: "Zeidex Search",
+            version: "0.4.0",
+            build: "release",
+            tauri: "2.12",
+            developer: "Zeidexsoft",
+            website: "https://zeidexsoft.com",
+            repository: "https://github.com/zeiad6/zeidex-search",
+            license: "GPL-3.0-or-later",
+            copyright: "Copyright © 2026 Zeidexsoft",
+          },
+          platform: {
+            os: "Windows 11 Pro",
+            arch: "x86_64",
+            family: "windows",
+            executable: "C:\\Users\\you\\AppData\\Local\\Zeidex\\zeidex.exe",
+          },
+          paths: {
+            config: demoSettings.configPath,
+            database: demoSettings.dbPath,
+            modelsBundled: "C:\\Users\\you\\AppData\\Local\\Zeidex\\models",
+            modelsUser: "C:\\Users\\you\\AppData\\Roaming\\zeidex\\models",
+            onnxRuntime: "C:\\Users\\you\\AppData\\Local\\Zeidex\\onnxruntime.dll",
+            pdfium: "C:\\Users\\you\\AppData\\Local\\Zeidex\\pdfium.dll",
+            startupLog: "C:\\Users\\you\\AppData\\Roaming\\zeidex\\zeidex-startup.log",
+          },
+          index: {
+            candidates: demoSettings.candidateCount,
+            documents: 214,
+            databaseBytes: 48_300_000,
+            scanRoots: demoSettings.fileScanExtraRoots,
+            exclusionRules: demoExclusions.length,
+          },
+        };
+      case "onboarding_status":
+        // `?welcome=1` shows the first-run guide in the browser demo; a normal
+        // demo visit is a returning user, so the guide stays out of the way.
+        return new URLSearchParams(window.location.search).get("welcome") !== "1";
+      case "onboarding_complete":
+        return true;
+      case "check_for_updates":
+        return {
+          current: "0.4.0",
+          latest: "0.4.0",
+          available: false,
+          url: "https://github.com/zeiad6/zeidex-search/releases/tag/v0.4.0",
+          notes: "",
+          publishedAt: "2026-11-20T10:00:00Z",
+          checkedAt: Math.floor(Date.now() / 1000),
+          error: null,
+        };
+      case "index_clear": {
+        const removed = demoSettings.candidateCount;
+        demoSettings = { ...demoSettings, candidateCount: 0 };
+        return removed;
+      }
+      case "search_history_clear":
+        return 0;
+      case "index_pause":
+        return true;
+      case "index_resume":
+        return true;
+      case "index_cancel":
+        return true;
+      case "index_control_state":
+        return "idle";
+      case "document_index_status":
+        return { enabled: true, count: 214 };
+      case "document_set_indexing":
+        return Boolean(args.enabled);
+      case "document_text_clear":
+        return 0;
       case "ocr_models_status":
         return MODELS;
       case "ocr_page_preview":
@@ -375,6 +648,26 @@ export function installMock() {
         const event = String(args.event ?? "");
         const handler = Number(args.handler ?? 0);
         listeners.set(event, handler);
+        // `?demo=1&update=1` makes the mock announce a release newer than this
+        // build, so the notification toast can be reviewed without cutting a
+        // release. Dev-only, like the rest of this file.
+        if (
+          event === "zeidex://update" &&
+          new URLSearchParams(window.location.search).get("update") === "1"
+        ) {
+          window.setTimeout(() => {
+            emit("zeidex://update", {
+              current: "0.4.0",
+              latest: "0.4.1",
+              available: true,
+              url: "https://github.com/zeiad6/zeidex-search/releases/tag/v0.4.1",
+              notes: "A calmer light theme and a fix for drives that report no free space.",
+              publishedAt: "2026-11-22T09:00:00Z",
+              checkedAt: Math.floor(Date.now() / 1000),
+              error: null,
+            });
+          }, 1200);
+        }
         return handler;
       }
       case "plugin:event|unlisten": {

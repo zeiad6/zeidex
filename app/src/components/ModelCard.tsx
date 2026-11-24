@@ -104,7 +104,7 @@ export default function ModelCard({
       className={`flex flex-col rounded-2xl border p-4 transition ${
         pack.active
           ? "border-accent-400/35 bg-accent-400/[0.045]"
-          : "border-white/[0.07] bg-white/[0.02]"
+          : "border-white/[0.07] bg-surface"
       }`}
       aria-label={name}
     >

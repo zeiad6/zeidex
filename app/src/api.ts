@@ -32,6 +32,10 @@ export interface LaunchResult {
   action: LaunchResultAction;
   icon?: string | null;
   match_kind?: MatchKind | null;
+  /** File size in bytes, when the row has a file behind it. */
+  size_bytes?: number | null;
+  /** Filesystem modification time (Unix seconds), when there is one. */
+  modified_unix_s?: number | null;
 }
 
 export interface ClipEntry {
@@ -480,6 +484,112 @@ export interface AutostartStatus {
   error: string | null;
 }
 
+/** The four rule kinds the walker understands. */
+export type ExclusionKind = "folder" | "file" | "extension" | "pattern";
+
+/**
+ * One saved exclusion. `added_at` is Unix seconds and may be `0` for a rule
+ * written into the config file by hand.
+ */
+export interface ExclusionEntry {
+  id: string;
+  kind: ExclusionKind;
+  value: string;
+  enabled: boolean;
+  added_at: number;
+}
+
+export interface PresetRule {
+  kind: ExclusionKind;
+  value: string;
+}
+
+export interface ExclusionPreset {
+  id: string;
+  name: string;
+  nameAr: string;
+  description: string;
+  descriptionAr: string;
+  rules: PresetRule[];
+  /** How many of the preset's rules are already in the list. */
+  alreadyApplied: number;
+}
+
+export interface ExclusionsSnapshot {
+  entries: ExclusionEntry[];
+  active: number;
+  presets: ExclusionPreset[];
+  configPath: string | null;
+  indexPath: string;
+}
+
+/** What a mutation did to the list and to the index. */
+export interface ExclusionsChange {
+  entries: ExclusionEntry[];
+  active: number;
+  /** Rows deleted because the new list rejects them. */
+  removed: number;
+  /** True when a full walk was requested (extension/pattern removed). */
+  reindexing: boolean;
+}
+
+/** A local volume, as the Drives screen shows it. */
+export interface DriveInfo {
+  root: string;
+  label: string;
+  removable: boolean;
+  /** `ssd`, `hdd` or `unknown`. Presentation only. */
+  kind: string;
+  totalBytes: number;
+  freeBytes: number;
+  /** True when the drive root itself is a configured scan root. */
+  scanRoot: boolean;
+}
+
+export interface DiagnosticsSnapshot {
+  app: {
+    name: string;
+    version: string;
+    build: string;
+    tauri: string;
+    developer: string;
+    website: string;
+    repository: string;
+    license: string;
+    copyright: string;
+  };
+  platform: { os: string; arch: string; family: string; executable: string };
+  paths: {
+    config: string | null;
+    database: string;
+    modelsBundled: string;
+    modelsUser: string;
+    onnxRuntime: string | null;
+    pdfium: string | null;
+    startupLog: string | null;
+  };
+  index: {
+    candidates: number;
+    documents: number;
+    databaseBytes: number;
+    scanRoots: string[];
+    exclusionRules: number;
+  };
+}
+
+/** The answer to "is there a newer release?", from the public GitHub API. */
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  available: boolean;
+  url: string;
+  notes: string;
+  publishedAt: string;
+  checkedAt: number;
+  /** Why the check could not answer; `null` when it did. */
+  error: string | null;
+}
+
 export interface AppSettings {
   version: string;
   platform: string;
@@ -490,6 +600,7 @@ export interface AppSettings {
   fileScanLimit: number;
   fileScanExtraRoots: string[];
   lazyIndexingEnabled: boolean;
+  startMinimized: boolean;
   localizedAppNames: boolean;
   clipboardHistoryLimit: number;
   clipboardFilterSecrets: boolean;
@@ -507,6 +618,7 @@ export interface SettingsPatch {
   fileScanLimit?: number;
   fileScanExtraRoots?: string[];
   lazyIndexingEnabled?: boolean;
+  startMinimized?: boolean;
   localizedAppNames?: boolean;
   clipboardHistoryLimit?: number;
   clipboardFilterSecrets?: boolean;
@@ -529,6 +641,9 @@ export const api = {
   indexResume: () => invoke<boolean>("index_resume"),
   indexCancel: () => invoke<boolean>("index_cancel"),
   indexControlState: () => invoke<string>("index_control_state"),
+  indexClear: () => invoke<number>("index_clear"),
+  // Removes the launch history only; the index keeps answering searches.
+  searchHistoryClear: () => invoke<number>("search_history_clear"),
   candidateCount: () => invoke<number>("candidate_count"),
   recordUsage: (candidateId: string, action: string) =>
     invoke<void>("record_usage", { candidateId, action }),
@@ -552,8 +667,35 @@ export const api = {
   settingsSnapshot: () => invoke<AppSettings>("settings_snapshot"),
   settingsPickFolder: (title?: string) =>
     invoke<string | null>("settings_pick_folder", { title }),
+  // A real picker for "exclude this file". The dialog runs in Rust for the same
+  // reason the folder picker does: the page never names a path it did not see
+  // the user choose.
+  settingsPickFile: (title?: string) =>
+    invoke<string | null>("settings_pick_file", { title }),
   settingsUpdate: (patch: SettingsPatch) =>
     invoke<SettingsUpdate>("settings_update", { patch }),
+  exclusionsSnapshot: () => invoke<ExclusionsSnapshot>("exclusions_snapshot"),
+  exclusionsAdd: (kind: ExclusionKind, value: string) =>
+    invoke<ExclusionsChange>("exclusions_add", { kind, value }),
+  // Only the fields that changed; the backend re-validates the value against
+  // the rule's own kind, so an edit cannot turn an extension into a path.
+  exclusionsUpdate: (id: string, change: { value?: string; enabled?: boolean }) =>
+    invoke<ExclusionsChange>("exclusions_update", { id, ...change }),
+  exclusionsRemove: (id: string) =>
+    invoke<ExclusionsChange>("exclusions_remove", { id }),
+  exclusionsClear: () => invoke<ExclusionsChange>("exclusions_clear"),
+  exclusionsApplyPreset: (preset: string) =>
+    invoke<ExclusionsChange>("exclusions_apply_preset", { preset }),
+  // How many indexed rows a candidate rule would reject right now.
+  exclusionsPreview: (kind: ExclusionKind, value: string) =>
+    invoke<number>("exclusions_preview", { kind, value }),
+  systemDrives: () => invoke<DriveInfo[]>("system_drives"),
+  diagnosticsSnapshot: () => invoke<DiagnosticsSnapshot>("diagnostics_snapshot"),
+  checkForUpdates: () => invoke<UpdateInfo>("check_for_updates"),
+  // The first-run guide is stored in the config file, not in webview storage:
+  // the shell reads it before the window is shown.
+  onboardingStatus: () => invoke<boolean>("onboarding_status"),
+  onboardingComplete: () => invoke<boolean>("onboarding_complete"),
   hotkeyStatus: () => invoke<HotkeyStatus>("hotkey_status"),
   // `null` resets to the default. A combination the OS refuses comes back as a
   // rejected promise carrying the reason, so the panel can show it verbatim.
@@ -715,4 +857,8 @@ export const api = {
     }),
   onMode: async (callback: (mode: string) => void): Promise<() => void> =>
     listen<string>("zeidex-mode", (event) => callback(event.payload)),
+  // Emitted only when a newer release exists. Nothing about the user travels
+  // with it; the payload is the public release record.
+  onUpdate: (callback: (info: UpdateInfo) => void): Promise<() => void> =>
+    listen<UpdateInfo>("zeidex://update", (event) => callback(event.payload)),
 };

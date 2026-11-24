@@ -78,7 +78,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             </div>
           </div>
 
-          <pre className="mt-4 max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-[0.68rem] leading-relaxed text-zinc-300">
+          <pre className="mt-4 max-h-40 overflow-auto rounded-lg border border-white/10 bg-code p-3 font-mono text-[0.68rem] leading-relaxed text-zinc-300">
             {message}
           </pre>
 

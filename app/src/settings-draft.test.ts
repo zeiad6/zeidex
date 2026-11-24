@@ -14,6 +14,7 @@ function settings(overrides: Partial<AppSettings> = {}): AppSettings {
     fileScanLimit: 5000,
     fileScanExtraRoots: ["/data/projects"],
     lazyIndexingEnabled: true,
+    startMinimized: true,
     localizedAppNames: false,
     clipboardHistoryLimit: 200,
     clipboardFilterSecrets: true,

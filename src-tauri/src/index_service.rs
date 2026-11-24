@@ -56,6 +56,9 @@ pub(crate) enum Request {
         generation: u64,
         warning: Option<String>,
     },
+    /// Rows were deleted outside the worker (an exclusion purge). Reload the
+    /// in-memory engine from SQLite and publish the new count; no walk.
+    Reload,
 }
 
 /// Flags the worker and the command layer share. Grouped so the worker takes
@@ -200,6 +203,33 @@ impl IndexService {
         }
         if self.tx.send(Request::Full { reply: None }).is_err() {
             self.full_pending.store(false, Ordering::Release);
+        }
+    }
+
+    /// Reloads the in-memory engine after rows were deleted outside the worker.
+    /// Queued, not synchronous: the caller is a UI command and the count is
+    /// published through the usual status event.
+    pub fn reload(&self) {
+        if self.tx.send(Request::Reload).is_err() {
+            eprintln!("zeidex: the index worker is not running; the count is stale");
+        }
+    }
+
+    /// Re-walks just these paths. Used when an exclusion is removed: the scope
+    /// that was hidden comes back without touching the rest of the disk.
+    pub fn reindex_paths(&self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        if self
+            .tx
+            .send(Request::Paths {
+                removed: Vec::new(),
+                added: paths,
+            })
+            .is_err()
+        {
+            eprintln!("zeidex: the index worker is not running; the scope was not re-indexed");
         }
     }
 
@@ -393,6 +423,22 @@ fn run_worker(
                         );
                     }
                 }
+            }
+            Request::Reload => {
+                // Rows were deleted by an exclusion purge. No walk: the walker
+                // would only confirm what the rule already says, and the user is
+                // waiting for the list to stop showing the file.
+                let count = reload_count(&app);
+                let indexing = walking.load(Ordering::Acquire);
+                emit(
+                    &app,
+                    IndexStatus {
+                        indexing,
+                        paused: indexing && matches!(control.state(), IndexRun::Paused),
+                        count,
+                        error: status_error(watch_warning.as_deref(), None),
+                    },
+                );
             }
             Request::Paths { removed, added } => {
                 let config = RuntimeConfig::load_cached();

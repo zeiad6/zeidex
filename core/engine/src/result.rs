@@ -18,6 +18,13 @@ pub struct LaunchResult {
     /// hits and the web row, which are not name matches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_kind: Option<String>,
+    /// File size in bytes, when the row has one. Shown as a secondary detail on
+    /// the result card; absent for apps, folders and content hits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    /// Filesystem modification time (Unix seconds), when the row has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_unix_s: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -75,6 +82,8 @@ impl From<(&Candidate, i64)> for LaunchResult {
             // Set by the engine when it knows which tier surfaced the row; the
             // plain conversion has no query to classify against.
             match_kind: None,
+            size_bytes: candidate.fs_size_bytes,
+            modified_unix_s: candidate.fs_modified_at_unix_s,
         }
     }
 }

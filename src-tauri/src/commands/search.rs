@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tauri::State;
-use zeidex_engine::{LaunchResult, LaunchResultAction};
+use tauri::{AppHandle, Manager, State};
+use zeidex_engine::{LaunchResult, LaunchResultAction, QueryEngine};
 use zeidex_storage::{DocumentHit, SearchSettings};
 
 use crate::index_service::IndexService;
@@ -112,6 +112,10 @@ fn merge_document_hits(results: &mut Vec<LaunchResult>, hits: Vec<DocumentHit>) 
             icon: None,
             // A content hit matched the text inside the file, not its name.
             match_kind: None,
+            // A document hit comes from the content index, which carries no
+            // filesystem facts; the card falls back to path and match type.
+            size_bytes: None,
+            modified_unix_s: None,
         });
     }
 }
@@ -150,6 +154,9 @@ fn web_search_result(query: &str, settings: SearchSettings) -> Option<LaunchResu
         icon: None,
         // The web row is not a name match against an indexed candidate.
         match_kind: None,
+        // Nothing on disk: a web row has no size and no modification time.
+        size_bytes: None,
+        modified_unix_s: None,
     })
 }
 
@@ -237,6 +244,28 @@ pub fn record_usage(
     Ok(())
 }
 
+/// Empties the candidate index. This is the Privacy screen's explicit "delete
+/// index" action: it removes file and folder rows (and their usage counts) and
+/// leaves settings, clipboard and recognized text alone. The next walk or
+/// "Reindex now" repopulates it; until then search returns nothing.
+#[tauri::command(async)]
+pub fn index_clear(app: AppHandle) -> Result<usize, String> {
+    let state = app.state::<AppState>();
+    let removed = QueryEngine::clear_index(&state.db_path).map_err(|err| err.to_string())?;
+    app.state::<IndexService>().reload();
+    Ok(removed)
+}
+
+/// Deletes the launch history (which results were opened and when).
+///
+/// The Privacy screen offers this next to "delete index": the files stay
+/// indexed and findable, but the ranking stops using what the user launched
+/// before. Nothing else in the database is touched.
+#[tauri::command(async)]
+pub fn search_history_clear(state: State<'_, AppState>) -> Result<usize, String> {
+    QueryEngine::clear_usage_history(&state.db_path).map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,6 +344,8 @@ mod tests {
             },
             icon: None,
             match_kind: None,
+            size_bytes: None,
+            modified_unix_s: None,
         }];
         merge_document_hits(&mut results, vec![hit("/docs/report.pdf", "revenue grew")]);
         assert_eq!(results.len(), 1, "the same file is not listed twice");

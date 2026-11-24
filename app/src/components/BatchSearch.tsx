@@ -19,6 +19,7 @@ import { BrandMark } from "./Brand";
 import FileGlyph from "./FileGlyph";
 import { Icon } from "./Icons";
 import WindowControls from "./WindowControls";
+import ThemeToggle from "./ThemeToggle";
 
 /** How many entries are rendered at once. A 2,000-name paste must not put
  *  2,000 rows in the DOM before the user has read the first one. */
@@ -318,6 +319,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
               <Icon name="export" size={13} />
               {exporting ? t("Writing…", "جارٍ الكتابة…") : t("Export Excel", "تصدير Excel")}
             </button>
+          <ThemeToggle rtl={rtl} />
           <WindowControls rtl={rtl} />
           </div>
         </header>
@@ -325,7 +327,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
         <div className="grid min-h-0 flex-1 gap-3 px-4 pb-4 lg:grid-cols-[minmax(0,1fr)_300px]">
           {/* ------------------------------------------------ input + results */}
           <div className="flex min-h-0 flex-col gap-3">
-            <section className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3">
+            <section className="rounded-2xl border border-white/[0.07] bg-surface p-3">
               <div className="mb-2 flex items-center gap-2">
                 <span className="text-[0.7rem] font-semibold text-zinc-200">
                   {t("Names to find", "الأسماء المطلوبة")}
@@ -420,7 +422,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
             </section>
 
             {/* ------------------------------------------------------ results */}
-            <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-white/[0.07] bg-white/[0.02]">
+            <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-white/[0.07] bg-surface">
               <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] px-3 py-2">
                 <div className="segment">
                   {FILTERS.map((item) => (
@@ -624,7 +626,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
 
           {/* ------------------------------------------------------- settings */}
           <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-            <section className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3">
+            <section className="rounded-2xl border border-white/[0.07] bg-surface p-3">
               <div className="mb-1 flex items-baseline justify-between">
                 <span className="text-[0.7rem] font-semibold text-zinc-200">
                   {t("Minimum match", "أدنى نسبة تطابق")}
@@ -671,7 +673,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
             </section>
 
             {report && summary && (
-              <section className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3">
+              <section className="rounded-2xl border border-white/[0.07] bg-surface p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[0.7rem] font-semibold text-zinc-200">
                     {t("Summary", "الملخص")}
@@ -723,7 +725,7 @@ export default function BatchSearch({ rtl, onBack }: { rtl: boolean; onBack: () 
               </section>
             )}
 
-            <section className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3 text-[0.6rem] leading-relaxed text-zinc-500">
+            <section className="rounded-2xl border border-white/[0.07] bg-surface p-3 text-[0.6rem] leading-relaxed text-zinc-500">
               <div className="mb-1 flex items-center gap-1.5 text-[0.65rem] font-semibold text-zinc-300">
                 <Icon name="lock" size={12} />
                 {t("Local only", "محلي فقط")}

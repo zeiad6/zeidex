@@ -39,6 +39,7 @@ pub struct SettingsSnapshot {
     pub file_scan_limit: u32,
     pub file_scan_extra_roots: Vec<String>,
     pub lazy_indexing_enabled: bool,
+    pub start_minimized: bool,
     pub localized_app_names: bool,
     pub clipboard_history_limit: u32,
     pub clipboard_filter_secrets: bool,
@@ -68,6 +69,7 @@ pub struct SettingsPatch {
     pub file_scan_limit: Option<u32>,
     pub file_scan_extra_roots: Option<Vec<String>>,
     pub lazy_indexing_enabled: Option<bool>,
+    pub start_minimized: Option<bool>,
     pub localized_app_names: Option<bool>,
     pub clipboard_history_limit: Option<u32>,
     pub clipboard_filter_secrets: Option<bool>,
@@ -118,6 +120,20 @@ pub fn settings_pick_folder(
     title: Option<String>,
 ) -> Result<Option<String>, String> {
     let picked = dialogs::pick_folder(&app, &state.paths, title)?;
+    Ok(picked.map(|path| path.display().to_string()))
+}
+
+/// Asks the user for one file, for a "exclude this file" rule.
+///
+/// Same contract as the folder picker: the dialog is Rust's, the path is minted
+/// here, and the page only learns what the user chose.
+#[tauri::command(async)]
+pub fn settings_pick_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    title: Option<String>,
+) -> Result<Option<String>, String> {
+    let picked = dialogs::pick_file(&app, &state.paths, title, None, &[])?;
     Ok(picked.map(|path| path.display().to_string()))
 }
 
@@ -254,6 +270,7 @@ fn build_snapshot(
         file_scan_limit: config.file_scan_limit as u32,
         file_scan_extra_roots: config.file_scan_extra_roots.clone(),
         lazy_indexing_enabled: config.lazy_indexing_enabled,
+        start_minimized: config.start_minimized,
         localized_app_names: config.localized_app_names,
         clipboard_history_limit: config.clipboard_history_limit as u32,
         clipboard_filter_secrets: config.clipboard_filter_secrets,
@@ -299,6 +316,9 @@ fn config_changes(patch: &SettingsPatch) -> Result<Vec<(String, String)>, String
     }
     if let Some(value) = patch.lazy_indexing_enabled {
         push("lazy_indexing_enabled", SettingValue::Bool(value))?;
+    }
+    if let Some(value) = patch.start_minimized {
+        push("start_minimized", SettingValue::Bool(value))?;
     }
     if let Some(value) = patch.localized_app_names {
         push("localized_app_names", SettingValue::Bool(value))?;
@@ -365,6 +385,7 @@ mod tests {
             file_scan_limit: Some(12_000),
             file_scan_extra_roots: Some(vec!["/tmp/zeidex-extra".to_string()]),
             lazy_indexing_enabled: Some(false),
+            start_minimized: Some(true),
             localized_app_names: Some(true),
             clipboard_history_limit: Some(250),
             clipboard_filter_secrets: Some(false),
@@ -380,6 +401,7 @@ mod tests {
                 "file_scan_limit",
                 "file_scan_extra_roots",
                 "lazy_indexing_enabled",
+                "start_minimized",
                 "localized_app_names",
                 "clipboard_history_limit",
                 "clipboard_filter_secrets",

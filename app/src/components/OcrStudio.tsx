@@ -13,6 +13,7 @@ import { BrandMark } from "./Brand";
 import FileGlyph from "./FileGlyph";
 import { Icon } from "./Icons";
 import WindowControls from "./WindowControls";
+import ThemeToggle from "./ThemeToggle";
 import PagePreviewPane from "./ocr/PagePreview";
 import RegionEditor from "./ocr/RegionEditor";
 import DataIntelligence from "./ocr/DataIntelligence";
@@ -590,6 +591,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                       : "Run OCR"}
               </button>
             )}
+            <ThemeToggle rtl={rtl} />
             <WindowControls rtl={rtl} />
           </div>
         </header>
@@ -602,7 +604,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             <Icon name="alert" size={13} />
             <span>{rtl ? "النماذج ناقصة:" : "Model files missing:"}</span>
             <span className="text-amber-200/70">{missing.join(", ")}</span>
-            <code className="ms-auto rounded bg-black/30 px-1.5 py-0.5 font-mono text-[0.65rem]">
+            <code className="ms-auto rounded bg-code px-1.5 py-0.5 font-mono text-[0.65rem]">
               ./scripts/fetch_models.sh
             </code>
           </div>
@@ -674,7 +676,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
             </div>
 
             {filePath && (
-              <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.02] px-2.5 py-1.5">
+              <div className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-surface-2 px-2.5 py-1.5">
                 <FileGlyph path={filePath} size={26} />
                 <div className="min-w-0 flex-1 leading-tight">
                   <p
@@ -781,7 +783,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
                     (sample) => (
                       <span
                         key={sample}
-                        className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.02] px-2 py-0.5 text-[0.6rem] text-zinc-500"
+                        className="flex items-center gap-1 rounded-full border border-white/[0.07] bg-surface-2 px-2 py-0.5 text-[0.6rem] text-zinc-500"
                       >
                         <FileGlyph path={sample} size={15} />
                         {fileFormatOf(sample).name}
@@ -817,7 +819,7 @@ export default function OcrStudio({ onBack, rtl }: { onBack: () => void; rtl: bo
           </section>
         </div>
 
-        <footer className="flex flex-wrap items-center gap-2 border-t border-white/[0.07] bg-black/20 px-5 py-2.5 text-[0.7rem] text-zinc-500">
+        <footer className="flex flex-wrap items-center gap-2 border-t border-white/[0.07] bg-sunken px-5 py-2.5 text-[0.7rem] text-zinc-500">
           <span className="flex items-center gap-1.5">
             <Icon name="export" size={12} />
             {rtl ? "تصدير كل الصفحات" : "Export all pages"}

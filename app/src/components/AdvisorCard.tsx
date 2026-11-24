@@ -45,7 +45,7 @@ export default function AdvisorCard({
     pack.state === "partial" ? t("Resume download", "متابعة التنزيل") : t("Download model", "تنزيل النموذج");
 
   return (
-    <section className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
+    <section className="rounded-2xl border border-white/[0.07] bg-surface p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Icon name="cpu" size={15} />
         <h2 className="text-sm font-semibold text-white">

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles.css";
 import { applyTheme, resolveTheme, storedTheme, systemPrefersLight } from "./theme";
+import { ThemeProvider } from "./theme-context";
 
 /**
  * In development, `?demo=launcher` or `?demo=ocr` installs a mocked Tauri
@@ -40,7 +41,9 @@ async function boot() {
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <App />
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
     </React.StrictMode>,
   );
 }

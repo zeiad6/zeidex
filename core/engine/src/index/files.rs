@@ -111,6 +111,7 @@ fn walk_files_with_depth(
     let root_path = path.to_string();
     let exclude_paths = config.file_exclude_paths.clone();
     let skip_dir_names = config.skip_dir_names.clone();
+    let exclusions = config.exclusion_set.clone();
     walker
         .hidden(false)
         .git_ignore(false)
@@ -135,6 +136,17 @@ fn walk_files_with_depth(
             let Some(name) = path_buf.file_name().and_then(|value| value.to_str()) else {
                 return false;
             };
+
+            // The user's own rules come first: a pruned directory costs one
+            // `file_type` call, while visiting its children costs a stat and a
+            // candidate each.
+            if exclusions.excludes(
+                path_str,
+                name,
+                entry.file_type().is_some_and(|t| t.is_dir()),
+            ) {
+                return false;
+            }
 
             if name.starts_with('.') {
                 return false;
@@ -216,6 +228,9 @@ fn candidate_from_metadata(
         || name.ends_with(".app")
         || should_skip_dir(name, &config.skip_dir_names)
         || should_exclude_path(path_str, &config.file_exclude_paths)
+        || config
+            .exclusion_set
+            .excludes(path_str, name, metadata.is_dir())
     {
         return None;
     }
@@ -251,6 +266,7 @@ fn candidate_from_metadata(
         let mut candidate = Candidate::new(&key, CandidateKind::File, name, path_str);
         candidate.subtitle = Some(CandidateKind::File.as_str().into());
         candidate.fs_modified_at_unix_s = modified_at;
+        candidate.fs_size_bytes = Some(metadata.len());
         return Some(candidate);
     }
 

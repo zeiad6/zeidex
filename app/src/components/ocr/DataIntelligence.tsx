@@ -717,7 +717,7 @@ export default function DataIntelligence({
         )}
       </div>
 
-      <footer className="flex flex-wrap items-center gap-1.5 border-t border-white/[0.07] bg-black/20 px-4 py-2 text-[0.62rem] text-zinc-500">
+      <footer className="flex flex-wrap items-center gap-1.5 border-t border-white/[0.07] bg-sunken px-4 py-2 text-[0.62rem] text-zinc-500">
         <span className="flex items-center gap-1.5">
           <Icon name="export" size={11} />
           {subject === "batch"

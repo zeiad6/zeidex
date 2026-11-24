@@ -165,13 +165,29 @@ pub fn run() -> anyhow::Result<()> {
             };
             app.manage(TrayAvailable(tray_ready));
 
+            // One quiet release check, then every six hours. It sends nothing
+            // about the user and only emits when a newer release exists.
+            commands::update::spawn_background_check(app.handle().clone());
+
             // Both are ways IN to a window that starts hidden. Losing the tray
             // (GNOME without AppIndicator) or the hotkey (Wayland denies the
             // grab) would otherwise leave a running process with no visible
             // surface and no obvious way to reach it. First launch is shown for
             // the same reason: a desktop entry that appears to do nothing is
             // indistinguishable from one that crashed.
-            if first_run || !hotkey_registered || !tray_ready {
+            //
+            // A login launch passes `--autostart` (see `commands::autostart`),
+            // which is what lets "Start minimized" mean something: the entry
+            // stays in the tray and the hotkey brings it up. Any other launch
+            // shows the window - a normal double-click that produces nothing
+            // reads as a broken app, not as a quiet one.
+            let launched_at_login = std::env::args().any(|argument| argument == "--autostart");
+            let config = zeidex_engine::config::RuntimeConfig::load_cached();
+            // The first-run guide outranks "Start minimized": a fresh install
+            // that stays silent looks like a failed install, and the guide is
+            // the only place the shortcut is ever explained.
+            let stays_hidden = launched_at_login && config.start_minimized && config.onboarding_seen;
+            if first_run || !hotkey_registered || !tray_ready || !stays_hidden {
                 show_main(app.handle());
             }
             // Eager mode starts the walk now; lazy mode waits for the first
@@ -220,6 +236,8 @@ pub fn run() -> anyhow::Result<()> {
             commands::search::index_pause,
             commands::search::index_resume,
             commands::search::index_cancel,
+            commands::search::index_clear,
+            commands::search::search_history_clear,
             commands::search::index_control_state,
             commands::search::candidate_count,
             commands::documents::document_index_status,
@@ -227,7 +245,19 @@ pub fn run() -> anyhow::Result<()> {
             commands::documents::document_text_store,
             commands::documents::document_text_remove,
             commands::documents::document_text_clear,
+            commands::exclusions::exclusions_snapshot,
+            commands::exclusions::exclusions_add,
+            commands::exclusions::exclusions_update,
+            commands::exclusions::exclusions_remove,
+            commands::exclusions::exclusions_clear,
+            commands::exclusions::exclusions_apply_preset,
+            commands::exclusions::exclusions_preview,
             commands::search::record_usage,
+            commands::diagnostics::diagnostics_snapshot,
+            commands::onboarding::onboarding_status,
+            commands::onboarding::onboarding_complete,
+            commands::drives::system_drives,
+            commands::update::check_for_updates,
             commands::clipboard::clipboard_list,
             commands::clipboard::clipboard_record_text,
             commands::clipboard::clipboard_poll,
@@ -271,6 +301,7 @@ pub fn run() -> anyhow::Result<()> {
             commands::settings::settings_snapshot,
             commands::settings::settings_update,
             commands::settings::settings_pick_folder,
+            commands::settings::settings_pick_file,
             commands::shortcut::hotkey_status,
             commands::shortcut::hotkey_set,
             commands::translate::translate_text,
@@ -352,12 +383,16 @@ fn quit_app(handle: &AppHandle) {
 }
 
 fn build_tray(handle: &AppHandle) -> anyhow::Result<()> {
-    let show = MenuItemBuilder::with_id("show", "Show Zeidex").build(handle)?;
+    let show = MenuItemBuilder::with_id("show", "Show Window").build(handle)?;
+    let search = MenuItemBuilder::with_id("search", "Open Search").build(handle)?;
     let ocr = MenuItemBuilder::with_id("ocr", "OCR Studio").build(handle)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit").build(handle)?;
+    let settings = MenuItemBuilder::with_id("settings", "Settings").build(handle)?;
+    let quit = MenuItemBuilder::with_id("quit", "Exit").build(handle)?;
     let menu = MenuBuilder::new(handle)
         .item(&show)
+        .item(&search)
         .item(&ocr)
+        .item(&settings)
         .separator()
         .item(&quit)
         .build()?;
@@ -386,9 +421,20 @@ fn build_tray(handle: &AppHandle) -> anyhow::Result<()> {
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => toggle_window(app),
+            // The tray's entries are explicit: show the window and switch the
+            // screen, rather than toggling it away because it happened to be
+            // focused when the menu was opened.
+            "search" => {
+                let _ = app.emit("zeidex-mode", "launcher");
+                show_main(app);
+            }
             "ocr" => {
                 let _ = app.emit("zeidex-mode", "ocr");
-                toggle_window(app);
+                show_main(app);
+            }
+            "settings" => {
+                let _ = app.emit("zeidex-mode", "settings");
+                show_main(app);
             }
             "quit" => quit_app(app),
             _ => {}

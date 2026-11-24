@@ -3,6 +3,7 @@ import { fileFormatOf } from "../file-format";
 import FileGlyph from "./FileGlyph";
 import { Icon, type IconName } from "./Icons";
 import { MATCH_KINDS } from "../match-kind";
+import { formatBytes } from "../batch-view";
 
 const KIND: Record<string, { icon: IconName; label: string; labelAr: string; tone: string }> = {
   app: {
@@ -70,6 +71,37 @@ function hint(action: LaunchResultAction, rtl: boolean): string {
   }
 }
 
+/**
+ * The drive a path lives on, for the metadata line.
+ *
+ * Only Windows-style paths answer: `C:\Users\me\a.txt` → `C:`. On POSIX the
+ * first component is a directory (`home`, `usr`), not a volume, and printing
+ * `/` on every row would be noise.
+ */
+export function driveOf(path: string): string | null {
+  const match = /^([A-Za-z]):[\\/]/.exec(path);
+  return match ? `${match[1].toUpperCase()}:` : null;
+}
+
+/**
+ * A short, locale-aware date. The full timestamp is in the title attribute, so
+ * a row stays scannable without hiding the exact value.
+ */
+export function formatModified(unixSeconds: number | null | undefined, rtl: boolean): string | null {
+  if (unixSeconds === null || unixSeconds === undefined || unixSeconds <= 0) return null;
+  const date = new Date(unixSeconds * 1000);
+  if (Number.isNaN(date.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat(rtl ? "ar" : "en", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
 export default function ResultList({
   results,
   selected,
@@ -121,6 +153,15 @@ export default function ResultList({
             : null;
         const match = result.match_kind ? MATCH_KINDS[result.match_kind] : undefined;
         const active = index === selected;
+        const drive = result.path ? driveOf(result.path) : null;
+        const modified = formatModified(result.modified_unix_s, rtl);
+        const size =
+          result.size_bytes !== null && result.size_bytes !== undefined
+            ? formatBytes(result.size_bytes)
+            : null;
+        // Date, size and drive share one quiet line. A row with none of them
+        // keeps only the path, so nothing reserves space for an em dash.
+        const facts = [modified, size, drive].filter(Boolean) as string[];
         return (
           <li key={result.id} role="none">
             <div
@@ -130,8 +171,10 @@ export default function ResultList({
               tabIndex={-1}
               onMouseEnter={() => onHover(index)}
               onClick={() => onRun(result)}
-              className={`group relative flex w-full cursor-default items-center gap-3 rounded-xl px-3 py-2.5 text-start transition-colors duration-150 ${
-                active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
+              className={`group relative flex w-full cursor-default items-center gap-3 rounded-xl border px-3 py-2.5 text-start transition-[background-color,border-color,box-shadow] duration-150 ${
+                active
+                  ? "border-white/10 bg-surface-3 shadow-[var(--shadow-card)]"
+                  : "border-transparent hover:border-white/[0.06] hover:bg-surface-2"
               }`}
             >
               <span
@@ -182,6 +225,30 @@ export default function ResultList({
                     {/* `bdi` isolates a Latin path from the RTL line: the order
                         stays LTR while the block keeps the row's alignment. */}
                     <bdi>{result.subtitle}</bdi>
+                  </span>
+                )}
+                {facts.length > 0 && (
+                  <span className="mt-1 flex items-center gap-1.5 text-[0.64rem] text-zinc-600">
+                    {modified && (
+                      <span className="inline-flex items-center gap-1">
+                        <Icon name="calendar" size={10} className="shrink-0" />
+                        <span dir="ltr">{modified}</span>
+                      </span>
+                    )}
+                    {modified && (size || drive) && <span aria-hidden="true">·</span>}
+                    {size && (
+                      <span className="inline-flex items-center gap-1">
+                        <Icon name="size" size={10} className="shrink-0" />
+                        <span dir="ltr">{size}</span>
+                      </span>
+                    )}
+                    {size && drive && <span aria-hidden="true">·</span>}
+                    {drive && (
+                      <span className="inline-flex items-center gap-1">
+                        <Icon name="drive" size={10} className="shrink-0" />
+                        <span dir="ltr">{drive}</span>
+                      </span>
+                    )}
                   </span>
                 )}
               </span>

@@ -10,6 +10,7 @@ export interface Draft {
   fileScanLimit: string;
   fileScanExtraRoots: string[];
   lazyIndexingEnabled: boolean;
+  startMinimized: boolean;
   localizedAppNames: boolean;
   clipboardHistoryLimit: string;
   clipboardFilterSecrets: boolean;
@@ -32,6 +33,7 @@ export function toDraft(settings: AppSettings): Draft {
     fileScanLimit: String(settings.fileScanLimit),
     fileScanExtraRoots: [...settings.fileScanExtraRoots],
     lazyIndexingEnabled: settings.lazyIndexingEnabled,
+    startMinimized: settings.startMinimized,
     localizedAppNames: settings.localizedAppNames,
     clipboardHistoryLimit: String(settings.clipboardHistoryLimit),
     clipboardFilterSecrets: settings.clipboardFilterSecrets,
@@ -93,6 +95,9 @@ export function diff(draft: Draft, settings: AppSettings): ChangeSet {
 
   if (draft.lazyIndexingEnabled !== settings.lazyIndexingEnabled) {
     patch.lazyIndexingEnabled = draft.lazyIndexingEnabled;
+  }
+  if (draft.startMinimized !== settings.startMinimized) {
+    patch.startMinimized = draft.startMinimized;
   }
   if (draft.localizedAppNames !== settings.localizedAppNames) {
     patch.localizedAppNames = draft.localizedAppNames;

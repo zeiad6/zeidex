@@ -1,3 +1,4 @@
+use crate::exclusions::{Exclusion, ExclusionSet};
 use crate::normalize::normalize_for_search;
 use crate::platform;
 #[cfg(test)]
@@ -59,22 +60,7 @@ pub const QUERY_SETTINGS_HINTS: [&str; 6] = [
     "sound",
 ];
 
-pub const SKIP_DIR_NAMES: [&str; 18] = [
-    "node_modules",
-    "target",
-    "build",
-    "dist",
-    "library",
-    "applications",
-    "old firefox data",
-    "deriveddata",
-    "pods",
-    "vendor",
-    "out",
-    "coverage",
-    "tmp",
-    "cache",
-    "venv",
+pub const SKIP_DIR_NAMES: [&str; 4] = [
     // Win7-era junctions inside %USERPROFILE%\Documents that redirect to
     // %USERPROFILE%\<name>. The ACL on these denies enumeration, so the
     // walker hits "Access denied" on every entry - and even when it didn't,
@@ -82,6 +68,7 @@ pub const SKIP_DIR_NAMES: [&str; 18] = [
     "my pictures",
     "my videos",
     "my music",
+    "old firefox data",
 ];
 
 #[derive(Clone, Debug)]
@@ -97,7 +84,22 @@ pub struct RuntimeConfig {
     pub file_exclude_paths: Vec<String>,
     pub skip_dir_names: Vec<String>,
     pub ignored_file_patterns: Vec<String>,
+    /// The Index Exclusions list the user maintains in Settings. Persisted one
+    /// `exclusion=` line per rule.
+    pub exclusions: Vec<Exclusion>,
+    /// Compiled form of the enabled rules. Rebuilt by `apply_from_contents`,
+    /// never read from the file, and cloned with the config so the walker pays
+    /// no compilation cost per entry.
+    pub exclusion_set: ExclusionSet,
     pub lazy_indexing_enabled: bool,
+    /// Keep the window hidden when Windows starts the app at login. Only
+    /// meaningful together with an autostart entry; the tray and the hotkey are
+    /// how the window comes back.
+    pub start_minimized: bool,
+    /// True once the first-run guide has been shown and dismissed. It is the
+    /// one thing a login launch is allowed to interrupt: a fresh install that
+    /// starts minimized would otherwise look like nothing happened.
+    pub onboarding_seen: bool,
     pub localized_app_names: bool,
     /// Unpinned text clips kept in the clipboard history.
     pub clipboard_history_limit: usize,
@@ -136,7 +138,11 @@ impl Default for RuntimeConfig {
                 .map(|value| value.to_string())
                 .collect(),
             ignored_file_patterns: Vec::new(),
+            exclusions: Vec::new(),
+            exclusion_set: ExclusionSet::default(),
             lazy_indexing_enabled: LAZY_INDEXING_ENABLED,
+            start_minimized: true,
+            onboarding_seen: false,
             localized_app_names: false,
             clipboard_history_limit: CLIPBOARD_HISTORY_LIMIT,
             clipboard_filter_secrets: CLIPBOARD_FILTER_SECRETS,
@@ -381,6 +387,16 @@ impl RuntimeConfig {
                         self.lazy_indexing_enabled = parsed;
                     }
                 }
+                "exclusion" => {
+                    // One line per rule. A malformed line is skipped, not
+                    // fatal: the rest of the file still describes the user's
+                    // settings.
+                    if let Some(entry) = Exclusion::decode(value)
+                        && !self.exclusions.iter().any(|known| known.id == entry.id)
+                    {
+                        self.exclusions.push(entry);
+                    }
+                }
                 _ if key.strip_prefix("ignored_patterns_").is_some() => {
                     let parsed = parse_pattern_values(value);
                     for pattern in parsed {
@@ -397,6 +413,16 @@ impl RuntimeConfig {
                         {
                             self.ignored_file_patterns.push(expanded);
                         }
+                    }
+                }
+                "start_minimized" => {
+                    if let Some(parsed) = parse_bool(value) {
+                        self.start_minimized = parsed;
+                    }
+                }
+                "onboarding_seen" => {
+                    if let Some(parsed) = parse_bool(value) {
+                        self.onboarding_seen = parsed;
                     }
                 }
                 "localized_app_names" => {
@@ -440,6 +466,13 @@ impl RuntimeConfig {
                 _ => {}
             }
         }
+        self.rebuild_exclusions();
+    }
+
+    /// Recompiles the matcher from `exclusions`. Called once after the file is
+    /// parsed, so a walk never compiles a glob per candidate.
+    fn rebuild_exclusions(&mut self) {
+        self.exclusion_set = ExclusionSet::compile(&self.exclusions);
     }
 }
 
@@ -461,10 +494,12 @@ pub enum SettingValue<'a> {
 /// The only keys the Settings Center writes. Anything else is rejected: a typo
 /// appended to the file would be a line the parser ignores, which reads as
 /// "saved" and does nothing.
-const BOOL_SETTING_KEYS: [&str; 3] = [
+const BOOL_SETTING_KEYS: [&str; 5] = [
     "lazy_indexing_enabled",
     "localized_app_names",
     "clipboard_filter_secrets",
+    "start_minimized",
+    "onboarding_seen",
 ];
 
 const PATH_LIST_SETTING_KEYS: [&str; 1] = ["file_scan_extra_roots"];
@@ -646,6 +681,59 @@ pub fn write_settings(path: &Path, changes: &[(String, String)]) -> Result<(), S
     write_atomically(path, &output)
 }
 
+/// Replaces every `exclusion=` line in the config with `entries`, leaving the
+/// rest of the file byte-identical.
+///
+/// `write_settings` cannot do this: it keeps one line per key by design, and
+/// the exclusion list is many lines under one key. The two writers agree on
+/// everything else - same atomic replace, same line-ending preservation - so a
+/// settings save and an exclusion edit cannot corrupt each other.
+pub fn write_exclusions(path: &Path, entries: &[Exclusion]) -> Result<(), String> {
+    let existing = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(format!("could not read {}: {err}", path.display())),
+    };
+
+    let mut output = String::with_capacity(existing.len() + entries.len() * 96);
+    for segment in existing.split_inclusive('\n') {
+        let (body, _) = split_line_ending(segment);
+        if assigned_key(strip_comments(body)) == Some("exclusion") {
+            continue;
+        }
+        output.push_str(segment);
+    }
+
+    if !entries.is_empty() {
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        const MARKER: &str = "# Index exclusions (managed by Settings)";
+        if !output.contains(MARKER) {
+            output.push_str(MARKER);
+            output.push('\n');
+        }
+        for entry in entries {
+            let line = entry.encode();
+            // A newline would become a second config line and a ` #` would be
+            // read back as a comment: both would store something the UI never
+            // showed. Refuse rather than silently truncate.
+            if line.chars().any(|character| character.is_control()) || strip_comments(&line) != line
+            {
+                return Err(format!(
+                    "{} cannot be stored in the config file",
+                    entry.value
+                ));
+            }
+            output.push_str("exclusion=");
+            output.push_str(&line);
+            output.push('\n');
+        }
+    }
+
+    write_atomically(path, &output)
+}
+
 /// Splits one `split_inclusive('\n')` segment into its body and its exact line
 /// ending, so rewriting one line cannot convert the file between LF and CRLF.
 fn split_line_ending(segment: &str) -> (&str, &str) {
@@ -790,11 +878,20 @@ ignored_patterns_sample=\n\
 # ignored_patterns_sqlite=~/Documents/git/project/**/*.db-wal|~/Documents/git/project/**/*.db-shm\n\
 # ignored_patterns_temp=~/Downloads/*.tmp|~/Downloads/**/*.part\n\
 lazy_indexing_enabled=true\n\
+# Keep the window hidden when the app starts at login (autostart). The tray\n\
+# icon and the global shortcut are how it comes back.\n\
+start_minimized=true\n\
+# Set once the first-run guide has been shown. A fresh install opens the window\n\
+# even with start_minimized=true, so the guide is never missed.\n\
+onboarding_seen=false\n\
 # Localized app and System Settings names. macOS 15.4+ only. Slows the first\n\
 # index pass (~3ms -> ~35ms on a 134-app machine) and caches bundle metadata\n\
 # for the process lifetime.\n\
 localized_app_names=false\n\
-skip_dir_names=node_modules,target,build,dist,library,applications,old firefox data,deriveddata,pods,vendor,out,coverage,tmp,cache,venv\n\
+# Folder names skipped at every depth. Only OS artifacts are here by default:\n\
+# project folders (node_modules, target, build, .venv) are opt-in rules in\n\
+# Settings > Exclusions, so a search never hides your own source tree.\n\
+skip_dir_names=my pictures,my videos,my music,old firefox data\n\
 \n\
 # Clipboard history size (10-1000). Out-of-range values fall back to 1000.\n\
 # Pinned clips are kept on top of this.\n\
@@ -1301,9 +1398,17 @@ mod tests {
             config
                 .skip_dir_names
                 .iter()
-                .any(|name| name == "node_modules")
+                .any(|name| name == "my pictures"),
+            "the OS junction default must survive a user list"
         );
         assert!(config.skip_dir_names.iter().any(|name| name == "vendor"));
+        assert!(
+            !RuntimeConfig::default()
+                .skip_dir_names
+                .iter()
+                .any(|name| name == "node_modules"),
+            "project folders are opt-in exclusions, not a hidden default"
+        );
 
         let _ = std::fs::remove_file(&tmp);
     }
@@ -2200,6 +2305,8 @@ clipboard_filter_secrets=false\r\n",
             "file_exclude_paths",
             "skip_dir_names",
             "lazy_indexing_enabled",
+            "start_minimized",
+            "onboarding_seen",
             "localized_app_names",
             "clipboard_history_limit",
             "clipboard_filter_secrets",

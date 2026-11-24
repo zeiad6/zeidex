@@ -7,6 +7,7 @@ import { Wordmark } from "./Brand";
 import ClipboardPanel from "./ClipboardPanel";
 import { Icon } from "./Icons";
 import ResultList from "./ResultList";
+import ThemeToggle from "./ThemeToggle";
 import WindowControls from "./WindowControls";
 import TranslationPanel from "./TranslationPanel";
 
@@ -445,6 +446,7 @@ export default function Launcher({
             >
               {rtl ? "EN" : "ع"}
             </button>
+            <ThemeToggle rtl={rtl} />
             <WindowControls rtl={rtl} />
           </div>
         </header>
@@ -540,14 +542,17 @@ export default function Launcher({
               {HINTS.map((hint) => (
                 <div
                   key={hint.title}
-                  className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"
+                  className="rounded-xl border border-white/[0.07] bg-surface p-3"
                 >
                   <span className="flex items-center gap-1.5 text-[0.62rem] font-semibold micro-label tracking-[0.14em] text-zinc-500">
                     <Icon name={hint.icon} size={12} />
                     {rtl ? hint.titleAr : hint.title}
                   </span>
+                  {/* `auto`, not `ltr`: the calculator and translate hints are
+                      Latin, but the search hint is Arabic prose and a forced
+                      LTR direction pins it to the wrong edge. */}
                   <span
-                    dir="ltr"
+                    dir="auto"
                     className="mt-1.5 block truncate font-mono text-[0.72rem] text-zinc-400"
                   >
                     {rtl ? hint.bodyAr : hint.body}
@@ -561,7 +566,7 @@ export default function Launcher({
               <button
                 type="button"
                 onClick={onOpenOcr}
-                className="group col-span-1 flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-start transition hover:border-accent-400/30 hover:bg-accent-400/[0.06] sm:col-span-2"
+                className="group col-span-1 flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-surface p-3 text-start transition hover:border-accent-400/30 hover:bg-accent-400/[0.06] sm:col-span-2"
               >
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-400/10 text-accent-300">
                   <Icon name="scan" size={15} />
@@ -578,7 +583,7 @@ export default function Launcher({
               <button
                 type="button"
                 onClick={onOpenBatch}
-                className="group flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-start transition hover:border-iris-400/30 hover:bg-iris-400/[0.06]"
+                className="group flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-surface p-3 text-start transition hover:border-iris-400/30 hover:bg-iris-400/[0.06]"
               >
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-iris-500/10 text-iris-400">
                   <Icon name="table" size={15} />
@@ -613,7 +618,7 @@ export default function Launcher({
           )}
         </div>
 
-        <footer className="flex items-center gap-3 border-t border-white/[0.07] bg-black/20 px-5 py-2.5 text-[0.7rem] text-zinc-500">
+        <footer className="flex items-center gap-3 border-t border-white/[0.07] bg-sunken px-5 py-2.5 text-[0.7rem] text-zinc-500">
           <span className="flex items-center gap-1.5">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-accent-400" />
             {translateText !== null

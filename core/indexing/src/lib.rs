@@ -409,6 +409,11 @@ pub struct Candidate {
     /// Lets the "recent" view surface freshly downloaded/created files the user
     /// hasn't opened through Zeidex yet. `None` for app/settings candidates.
     pub fs_modified_at_unix_s: Option<i64>,
+    /// File size in bytes, captured at index time. `None` for a folder (whose
+    /// "size" is not one number), an app bundle or a row with no filesystem
+    /// target. The result card shows it so two files with the same name can be
+    /// told apart without opening them.
+    pub fs_size_bytes: Option<u64>,
     /// What to draw this row as, when it asked for something. Only a declared
     /// source sets it; everything else takes its icon from the kind or the path.
     pub icon: Option<Box<str>>,
@@ -443,6 +448,7 @@ impl Default for Candidate {
             use_count: 0,
             last_used_at_unix_s: None,
             fs_modified_at_unix_s: None,
+            fs_size_bytes: None,
             icon: None,
         }
     }

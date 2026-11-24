@@ -86,10 +86,12 @@ fn status_with(
 }
 
 /// The `Run` value: the executable, quoted so a path with spaces stays one
-/// argument. A Windows path cannot contain a double quote.
+/// argument, followed by `--autostart` so a login start can stay in the tray
+/// while a normal double-click shows the window. A Windows path cannot contain a
+/// double quote.
 #[allow(dead_code)] // Used on Windows; tested on every host.
 fn windows_value(exe: &Path) -> String {
-    format!("\"{}\"", exe.display())
+    format!("\"{}\" --autostart", exe.display())
 }
 
 /// An XDG desktop entry. `Exec` follows the Desktop Entry spec: always quoted,
@@ -102,7 +104,7 @@ fn desktop_entry(exe: &Path) -> String {
          Version=1.0\n\
          Name=Zeidex Search\n\
          Comment=Offline launcher and document OCR studio\n\
-         Exec={}\n\
+         Exec={} --autostart\n\
          Icon=zeidex\n\
          Terminal=false\n\
          StartupNotify=false\n\
@@ -143,6 +145,7 @@ fn launch_agent_plist(exe: &Path) -> String {
          \x20 <key>ProgramArguments</key>\n\
          \x20 <array>\n\
          \x20   <string>{}</string>\n\
+         \x20   <string>--autostart</string>\n\
          \x20 </array>\n\
          \x20 <key>RunAtLoad</key>\n\
          \x20 <true/>\n\
@@ -426,7 +429,7 @@ mod tests {
     fn the_windows_value_quotes_a_path_with_spaces() {
         assert_eq!(
             windows_value(Path::new(r"C:\Program Files\Zeidex\zeidex.exe")),
-            r#""C:\Program Files\Zeidex\zeidex.exe""#
+            r#""C:\Program Files\Zeidex\zeidex.exe" --autostart"#
         );
     }
 
@@ -434,7 +437,7 @@ mod tests {
     fn the_desktop_entry_quotes_and_escapes_the_executable() {
         let entry = desktop_entry(Path::new("/home/u/My Apps/$zeidex`x/zeidex"));
         assert!(
-            entry.contains(r#"Exec="/home/u/My Apps/\$zeidex\`x/zeidex""#),
+            entry.contains(r#"Exec="/home/u/My Apps/\$zeidex\`x/zeidex" --autostart"#),
             "{entry}"
         );
         assert!(entry.contains("Terminal=false"));

@@ -136,10 +136,15 @@ fn builder(
     if let Some(title) = title.filter(|value| !value.trim().is_empty()) {
         builder = builder.set_title(title);
     }
-    builder.add_filter(
-        filter_name.unwrap_or_else(|| "Files".to_string()),
-        extensions,
-    )
+    // An empty extension list means "any file": adding a filter with no
+    // extensions makes the dialog show nothing at all.
+    if !extensions.is_empty() {
+        builder = builder.add_filter(
+            filter_name.unwrap_or_else(|| "Files".to_string()),
+            extensions,
+        );
+    }
+    builder
 }
 
 /// Writes through a sibling staging file and renames it over the target.
