@@ -71,22 +71,59 @@ Arabic, and a PDF that breaks Arabic is worse than no button.
 - A rate-limited translation (Google's HTML apology page under HTTP 200) was
   reported as "response parse failed". It now reports that translation is rate
   limited, and still returns no text rather than an invented one.
+- **Clear search history** deleted the event log but left the per-file launch
+  counters the ranker reads, so the action changed nothing observable until a
+  reindex. Both are now cleared in one transaction and the engine is reloaded.
+
+### The shell catches up with the engine
+
+The settings screens were mostly promises. This pass makes them real:
+
+- **One theme system, everywhere.** A single provider owns light, dark and
+  system; the same sun/moon toggle sits in the launcher, the Studio, batch
+  search, models and Settings. The light theme is warm paper (`#f3f4f6` page,
+  `#fafaf9` surface, white only for cards), not full-screen white; the dark
+  theme has four elevation steps instead of one flat black. The choice is
+  stored, applied before first paint, and the 260 ms cross-fade is skipped under
+  `prefers-reduced-motion`.
+- **Index Exclusions, enforced in the walker.** Folder, file, extension and safe
+  glob rules are persisted one per config line and compiled once per walk. An
+  excluded directory is pruned before its children are stat-ed, so no metadata,
+  OCR or database row is produced for it. Adding a rule deletes the rows it
+  rejects; removing one re-walks only the scope it covered. The development and
+  temporary presets are opt-in, and the default skip list no longer hides
+  `node_modules`, `target` or `build`.
+- **Start with Windows, optionally in the tray.** The switch reads the real
+  `HKCU\...\Run` value back after every write. A login launch passes
+  `--autostart`; with **Start Minimized** it stays in the tray, reachable from
+  the menu (Show Window, Open Search, OCR Studio, Settings, Exit) or the global
+  shortcut. A first run always opens the window.
+- **A guide the first time.** The welcome sheet names the registered shortcut
+  (not the default), the keys that move through results, the context menu and
+  the tray. It is a modal - focus moves in, Tab is trapped, Escape is consumed -
+  and it is written once, then reopenable from Settings > General.
+- **About & Diagnostics** reads the build, publisher, maintainer, paths, model
+  libraries and index size from the running process, and **Check for updates**
+  asks the public GitHub releases API, showing a dismissible toast when a newer
+  tag exists. Nothing about the user or the index is sent.
 
 ### Verified in this release
 
 | Gate | Result |
 | --- | --- |
-| Core tests | 620 passed |
-| Shell tests | 81 passed |
-| Frontend tests | 102 passed |
-| Clippy + rustfmt | clean, 0 warnings |
+| Core tests | 631 passed, 0 failed |
+| Shell tests | 92 passed, 0 failed |
+| Frontend tests | 102 passed, 0 failed |
+| TypeScript + Vite build | clean |
+| Clippy + rustfmt (core, shell) | clean, 0 warnings |
 | Arabic OCR corpus | CER 0.60 %, WER 3.45 % |
-| Accessibility (axe-core 4.10.2) | 0 violations, panel open, dark/RTL/light |
-| Release binary | launches, indexes 5079 candidates, full schema |
+| Accessibility (axe-core 4.10.2) | 0 violations across 14 screens: launcher, welcome, General, Exclusions, Startup, Privacy and About; light, dark and RTL |
+| Package | `make deb` produced `Zeidex Search_0.4.0_arm64.deb` (52.85 MiB); metadata and extracted binary inspected |
 
-The Windows runtime, the MSI/NSIS installers and GPU acceleration were **not**
-exercised in the environment that produced this commit. They are listed in
-`ENGINEERING_REPORT_0.4.0.md` § J with the reason, not described as done.
+The Windows runtime, the MSI/NSIS installers, the Windows autostart entry and
+GPU acceleration were **not** exercised in the arm64 Linux environment that
+produced this package. They are listed in `ENGINEERING_REPORT_0.4.0.md` § J
+with the reason, not described as done.
 
 The Arabic recognizer was also put to a direct A/B: the bundled PP-OCRv4 model
 scored CER 0.60 % / WER 3.45 % on the labelled corpus, the PP-OCRv5 candidate

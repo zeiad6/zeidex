@@ -512,9 +512,13 @@ html[data-theme="light"] {
   --color-ink-700: #e2e5e9;
   --color-ink-600: #c6cbd3;
 
-  /* Cyan on paper: 700 for text, 600 for fills that carry dark text. */
+  /* Cyan on paper: 700 for text, 600 for fills that carry dark text.
+     `accent-200` is the label colour inside a tinted accent chip
+     (`bg-accent-400/15`), where 600 measures 4.05:1 — below AA for 12 px text.
+     It therefore shares the 700 value; `accent-300/400` stay 600 for icons and
+     borders, which only need 3:1. */
   --color-accent-100: #155e75;
-  --color-accent-200: #0e7490;
+  --color-accent-200: #155e75;
   --color-accent-300: #0e7490;
   --color-accent-400: #0e7490;
   --color-accent-500: #0891b2;
