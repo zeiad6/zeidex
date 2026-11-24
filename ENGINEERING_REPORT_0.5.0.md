@@ -168,6 +168,22 @@ the 0.4.0 file was restored from the verified copy
 ## K. GitHub release
 
 Release commit `d591796`; the source is pushed to `origin/main` and tagged
-`v0.5.0`. The `Release` workflow builds the Windows and Linux x64 bundles from
-that tag and attaches them to a draft release; the arm64 deb built here is
-attached to the same release. Nothing in the 0.4.0 release is replaced.
+`v0.5.0`. Workflow run `45315922925` (Linux and Windows jobs) completed with
+success and created the draft release
+<https://github.com/zeiad6/zeidex-search/releases/tag/v0.5.0>. The arm64 deb
+built here and a `SHA256SUMS` covering all six assets were attached, and the
+release was published on 2026-11-24T03:21:42Z.
+
+| Asset | Bytes | SHA-256 (GitHub digest) |
+| --- | --- | --- |
+| `Zeidex.Search_0.5.0_x64_en-US.msi` | 51,023,872 | `630d9da55a7b505b5f9295c62342045b74410b0e45bb3515b06d2b90daece991` |
+| `Zeidex.Search_0.5.0_x64-setup.exe` | 45,914,459 | `5c62845c934333aab39f52bbc42de4aea2cb0013e7303be768bb8626deca1845` |
+| `Zeidex.Search_0.5.0_amd64.deb` | 51,691,862 | `44497685688c64c13893086c69f77e5d2ee2f65326c7735a0c4a75d8c01d26b6` |
+| `Zeidex.Search_0.5.0_amd64.AppImage` | 133,118,456 | `614516ab205b000b2d69e0f0ebfb2ae12d939f402a4ca84e8d5efee8f0ff849a` |
+| `Zeidex.Search_0.5.0_arm64.deb` | 50,176,778 | `a5710fe024f60993253d60781275d889a93287b5a6905fe10571609cff096df6` |
+| `SHA256SUMS` | 493 | `bba36d3534d88182058f7f92f9d3fbcb09b37e614f0bdaa5667f6fc8be64d3eb` |
+
+The Linux job also installed the built deb on the runner and checked
+`dpkg -s zeidex-search` plus the binary and model paths, so the amd64 package is
+an installed-and-registered artifact, not only a build output. Nothing in the
+0.4.0 release was replaced: it keeps its tag, body and five assets.
