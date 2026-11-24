@@ -134,7 +134,7 @@ package: make deb
 | Package | `zeidex-search` |
 | Version | `0.5.0` |
 | Architecture | `arm64` |
-| File | `Zeidex Search_0.5.0_arm64.deb` |
+| File | `Zeidex Search_0.5.0_arm64.deb` (uploaded as `Zeidex.Search_0.5.0_arm64.deb`) |
 | Size | 50,176,778 bytes (47.85 MiB) |
 | SHA-256 | `a5710fe024f60993253d60781275d889a93287b5a6905fe10571609cff096df6` |
 | Extracted binary | differs from `target/release/zeidex` by exactly the 3 bytes Tauri patches per bundle type |

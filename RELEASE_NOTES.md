@@ -109,7 +109,7 @@ or index content.
 | Clippy + rustfmt (core, shell) | clean, 0 warnings |
 | Accessibility (axe-core 4.10.2) | 0 violations across 16 screens: launcher, welcome, General, Indexing, Exclusions, Startup, Privacy and About; light, dark and RTL |
 | Result menu | right-click and Shift+F10 open Open, Open location and Copy path; axe 0 violations with the menu open |
-| Package | `make deb` produced `Zeidex Search_0.5.0_arm64.deb`; metadata and extracted binary inspected |
+| Package | `make deb` produced `Zeidex.Search_0.5.0_arm64.deb`; metadata and extracted binary inspected |
 
 The Windows runtime, the MSI/NSIS installers, the Windows autostart entry and
 GPU acceleration were **not** exercised in the arm64 Linux environment that
@@ -577,11 +577,11 @@ working until the new one verifies.
 
 | Platform | Package | Best for |
 | --- | --- | --- |
-| **Windows 10/11 (x64)** | `Zeidex Search_0.5.0_x64_en-US.msi` | Standard installer, per-machine or per-user, WiX-based. |
-| **Windows 10/11 (x64)** | `Zeidex Search_0.5.0_x64-setup.exe` | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
-| **Linux (x86_64)** | `Zeidex Search_0.5.0_amd64.deb` | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
-| **Linux (x86_64)** | `Zeidex Search_0.5.0_amd64.AppImage` | Any distribution; no installation, no root. |
-| **Linux (arm64)** | `Zeidex Search_0.5.0_arm64.deb` | Raspberry Pi 4/5 and ARM laptops on Debian 12+ or Ubuntu 22.04+. |
+| **Windows 10/11 (x64)** | `Zeidex.Search_0.5.0_x64_en-US.msi` | Standard installer, per-machine or per-user, WiX-based. |
+| **Windows 10/11 (x64)** | `Zeidex.Search_0.5.0_x64-setup.exe` | Lightweight NSIS installer; pick this if MSI is blocked by policy. |
+| **Linux (x86_64)** | `Zeidex.Search_0.5.0_amd64.deb` | Debian, Ubuntu, Mint, Pop!_OS and derivatives. |
+| **Linux (x86_64)** | `Zeidex.Search_0.5.0_amd64.AppImage` | Any distribution; no installation, no root. |
+| **Linux (arm64)** | `Zeidex.Search_0.5.0_arm64.deb` | Raspberry Pi 4/5 and ARM laptops on Debian 12+ or Ubuntu 22.04+. |
 
 > The arm64 Debian package was built and inspected in this tree. The Windows and
 > amd64 packages are produced by the `Release` workflow when the `v0.5.0` tag is
@@ -601,32 +601,32 @@ working until the new one verifies.
 **Windows — MSI**
 
 ```powershell
-msiexec /i "Zeidex Search_0.5.0_x64_en-US.msi"
+msiexec /i "Zeidex.Search_0.5.0_x64_en-US.msi"
 ```
 
 **Windows — NSIS**
 
 ```powershell
-"Zeidex Search_0.5.0_x64-setup.exe"
+"Zeidex.Search_0.5.0_x64-setup.exe"
 ```
 
 **Debian / Ubuntu (x86_64)**
 
 ```bash
-sudo apt install "./Zeidex Search_0.5.0_amd64.deb"
+sudo apt install "./Zeidex.Search_0.5.0_amd64.deb"
 ```
 
 **Debian / Ubuntu (arm64)**
 
 ```bash
-sudo apt install "./Zeidex Search_0.5.0_arm64.deb"
+sudo apt install "./Zeidex.Search_0.5.0_arm64.deb"
 ```
 
 **AppImage**
 
 ```bash
-chmod +x "Zeidex Search_0.5.0_amd64.AppImage"
-./"Zeidex Search_0.5.0_amd64.AppImage"
+chmod +x "Zeidex.Search_0.5.0_amd64.AppImage"
+./"Zeidex.Search_0.5.0_amd64.AppImage"
 ```
 
 The Linux packages depend on `libwebkit2gtk-4.1-0`, `libgtk-3-0` and
@@ -662,21 +662,21 @@ arm64 package was built from the same commit on aarch64 Linux and inspected with
 `dpkg-deb`. Verify a download before installing:
 
 ```bash
-sha256sum "Zeidex Search_0.5.0_arm64.deb"
+sha256sum "Zeidex.Search_0.5.0_arm64.deb"
 # 33674452e76d642b7c0af1c5ee51a40d77bfeefecfe4d9c0e10ed9191b0ae4e1
 ```
 
 ```powershell
-Get-FileHash "Zeidex Search_0.5.0_x64_en-US.msi" -Algorithm SHA256
+Get-FileHash "Zeidex.Search_0.5.0_x64_en-US.msi" -Algorithm SHA256
 # 67713344233d4da6290e93c1a2ce9c93664e5f857b6b7bdf743573ea2a21cbda
-Get-FileHash "Zeidex Search_0.5.0_x64-setup.exe" -Algorithm SHA256
+Get-FileHash "Zeidex.Search_0.5.0_x64-setup.exe" -Algorithm SHA256
 # b0f811764d1236f70a5174db03796eed256c7e1739e9645cc108641b432b5b89
 ```
 
 ```bash
-sha256sum "Zeidex Search_0.5.0_amd64.deb"
+sha256sum "Zeidex.Search_0.5.0_amd64.deb"
 # ef0eaae53683187820b5c00c73879e80a87babcec46a6da7737a6a4643490049
-sha256sum "Zeidex Search_0.5.0_amd64.AppImage"
+sha256sum "Zeidex.Search_0.5.0_amd64.AppImage"
 # 6cba11c6bb850133bb1eac891ea0dec23d5c884421c56a0bb9dde047f7fa98b8
 ```
 
